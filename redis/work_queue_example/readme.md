@@ -81,7 +81,7 @@ python simple_request.py 
 - Report the results and the detected objects with their confidence scores.  
 
 ### 4. Concurrency and Scaling
-- Identify and Ddscribe the main issues that occur when multiple web servers (`run_web_server.py`) and/or multiple model servers (`run_model_server.py`) are running at the same time.    
+- Identify and Describe the main issues that occur when multiple web servers (`run_web_server.py`) and/or multiple model servers (`run_model_server.py`) are running at the same time.    
 - Update the code to fix one issue, test that it works, and explain the solution using words and diagrams.  
 
 ### 5. Reducing Polling Overhead
