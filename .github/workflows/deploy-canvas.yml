@@ -1,0 +1,30 @@
+name: Deploy Canvas Course
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'canvas/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout content
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install mdxcanvas
+
+      - name: Deploy to Canvas
+        env:
+          CANVAS_API_TOKEN: ${{ secrets.CANVAS_API_TOKEN }}
+        run: |
+          mdxcanvas --course-info canvas/course_info/winter26.json canvas/course.canvas.md.xml.jinja

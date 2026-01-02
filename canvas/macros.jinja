@@ -1,0 +1,11 @@
+{% macro box_maker(type, title) %}
+<div class="{{ type }}"><strong class="{{ type }}">{{ title }}</strong>
+  {{ caller() }}
+</div>
+{% endmacro %}
+
+{% macro spoiler(title) %}
+<details><summary>▶ <strong>{{ title }}</strong></summary>
+  {{ caller() }}
+</details>
+{% endmacro %}
