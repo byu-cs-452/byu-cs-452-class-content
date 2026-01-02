@@ -1,19 +1,12 @@
-<div>
-    <course-settings
-        name='CS 452 - Database Modeling Concepts ({{ SEMESTER_NAME }})'
-        code='CS 452 (W26)'
-    />
-
+<div class="course">
+    <course-settings name="CS 452 - Database Modeling Concepts ({{ SEMESTER_NAME }})" code="CS 452" />
     <assignment-groups>
-        <group name="Assignments" weight="30"/>
-        <group name="Projects" weight="40"/>
+        <group name="Assignments" weight="70"/>
         <group name="Exams" weight="30"/>
     </assignment-groups>
 
-    <!-- Setup -->
     <include path="modules/00-Setup/setup.canvas.md.xml.jinja"/>
 
-    <!-- Migrated Modules -->
     <include path="modules/00-Introduction/00-Introduction.canvas.md.xml.jinja"/>
     <include path="modules/01-SQL/01-SQL.canvas.md.xml.jinja"/>
     <include path="modules/02-Design/02-Design.canvas.md.xml.jinja"/>
@@ -28,4 +21,5 @@
     <include path="modules/11-Storage,-and-Indexes/11-Storage,-and-Indexes.canvas.md.xml.jinja"/>
     <include path="modules/12-Transaction-Management/12-Transaction-Management.canvas.md.xml.jinja"/>
     <include path="modules/13-Extra-Credit/13-Extra-Credit.canvas.md.xml.jinja"/>
+    <include path="modules/99-Orphans/99-Orphans.canvas.md.xml.jinja"/>
 </div>
