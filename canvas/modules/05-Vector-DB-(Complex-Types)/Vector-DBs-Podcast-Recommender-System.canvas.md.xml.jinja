@@ -1,0 +1,150 @@
+<assignment title="Vector DBs: Podcast Recommender System" points_possible="25.0" due_at="{{ DUE_VECTOR_DBS__PODCAST_RECOMMENDER_SYSTEM_5 }}">
+  <description>
+## Introduction
+
+Vector databases are currently widely used in industry to solve problems such as similarity and semantic search, retrieval augmented generation, image search, recommendation systems, natural language processing (NLP), and computer vision.
+
+The basic idea is that we some type of neural network to compress salient information found in high dimensional data, such as large documents or images, into a fixed size low-dimensional vector. Vectors refer to mathematical representations of data points in multidimensional space. They are typically arrays or lists of numerical values that capture an entity's essential features or attributes. In machine learning and data science, vectors encode information in a way that enables efficient computation and analysis.
+
+Recent advances in vector DBs allow us to perform linear-algebra computations on vector spaces with raw SQL code. In this lab we will use pgvector, which is a PostgreSQL extension that provides powerful functionalities for working with vectors in high-dimensional space. It introduces a dedicated data type, operators, and functions that enable efficient storage, manipulation, and analysis of vector data directly within the PostgreSQL database.
+
+One of the main challenges and learning opportunities in this project will be transforming and moving data into PostgreSQL.
+
+## Podcast Recommendation
+
+In this lab we will build a small-scale podcast recommender system using the science and technology podcast [The Lex Fridman Podcast](https://www.youtube.com/lexfridman). Specifically, we will use GPT models from OpenAI to embed podcast segments into a vector space. We will load these vectors into a postgres database with the pgvector extension enabled. Finally, we will write queries to find similar segments and similar episodes to an input podcast segment.
+
+## Building your service
+
+In order to build our recommender system, we will use a managed postgres instance, and the python postgres client [pyscopg2.](https://pypi.org/project/psycopg2)
+
+### Dataset
+
+We will use the open source lex fridman dataset hosted on HuggingFace, which contains text transcripts of recent Lex Fridman podcast episodes. The dataset consists of 346 podcasts and 832,839 podcast segments. A podcast segment is one or two sentences uttered by the same speaker.  I have already passed the raw text through the [OpenAI embeddings API](https://platform.openai.com/docs/guides/embeddings)and generated 128 dimensional vector for each of the 832,839 podcast segments found in the dataset. You can download the raw podcast content [here](https://drive.google.com/file/d/1RXxlcUBHhE4_fQHU3qlX7Ghz5pBSvNrV/view?usp=sharing) and the embeddings [here.](https://drive.google.com/file/d/1uCx21PhPtpnmy3ZpTc8MoR0vvokTYzrB/view?usp=drive_link) (or use [colab notebook](https://colab.research.google.com/github/byu-cs-452/byu-cs-452-class-content/blob/main/embed/VectorDB_Lab_CS452_(starter).ipynb))
+
+### Setup your postgres instance
+
+You can use a 30-day free trial on TimescaleDB ([instructions](pages/g705ffc766421c8f082129bde66d28d25)).
+
+### Database Schema
+
+We will create a database with two tables: podcast and segment:
+
+**podcast**
+
+* PK: id
+  + The unique podcast id found in the huggingface data (i,e., TRdL6ZzWBS0  is the ID for Jed Buchwald: Isaac Newton and the Philosophy of Science | Lex Fridman Podcast #214)
+* title
+  + The title of podcast (ie., Jed Buchwald: Isaac Newton and the Philosophy of Science | Lex Fridman Podcast #214)
+
+**segment**
+
+* PK: id
+  + the unique identifier for the podcast segment. This was created by concatenating the podcast idx and the segment index together (ie., "0;1") is the 0th podcast and the 1st segment
+  + This is present in the as the "custom\_id" field in the `embedding.jsonl` and batch\_request.jsonl files
+* start\_time
+  + The start timestamp of the segment
+* end\_time
+  + The end timestamp of the segment
+* content
+  + The raw text transcription of the podcast
+* embedding
+  + the 128 dimensional vector representation of the text
+* FK: podcast\_id
+  + foreign key to podcast.id
+
+### Starter Code
+
+**Colab Option: Or use the [starter notebook in colab](https://colab.research.google.com/github/byu-cs-452/byu-cs-452-class-content/blob/main/embed/VectorDB_Lab_CS452_(starter).ipynb).**
+
+**Local Option:** Dr Jenkins provided starter code at this [GitHub repo](https://github.com/porterjenkins/byu-cs452-labs/tree/main/recommender). Your task will be through each of the files in the starter code and fill in the missing TODO statements. The starter code is meant to provide you with the primary logical blocks required to complete the lab. Importantly, I've also included a requirements file so you can easily install the required libraries. It is recommended you use a conda environment for this project.   
+  
+db\_build.py
+
+In this file you will implement the following major functions:
+
+* create the pgvector extension for postgres (code given)
+* write a create table statement for the podcast table
+* write a create table statement for the segment table
+* using the pyscopg2 python client, create both the tables
+
+#### db\_insert.py
+
+In this file we will populate our database with podcast data. There are several data sources, so you will need to look at the data from each source to determine where the fields for each table come from to create the appropriate dataframes.
+
+* read the raw text data from each of the batch\_request\_{XX}.jsonl files
+* read the vector embeddings from the embeddings.jsonl files
+* [optional] read the raw dataset from HuggingFace
+* insert all podcasts into the podcast table
+  + The recommended way to do this is to create a pandas dataframe, which you will pass into the provided `fast\_pg\_insert` function. This uses pgcopy module of psycopg2 and is screaming fast. Otherwise you could wait a very long time for the insert to complete
+* insert all the podcast segments into the podcast segments table
+  + The recommended insertion method is the same as above
+
+Currently pgvector supports the following distance functions:
+
+* `<->` - L2 distance
+* `<#>` - (negative) inner product
+* `<=>` - cosine distance
+* `<+>` - L1 distance (added in 0.7.0)
+
+See the [pgvector docs](https://github.com/pgvector/pgvector) for a full list of vector operations.
+
+#### db\_query.py
+
+In this file you will write queries to answer the following questions. Use L2 distance for all queries. In each case, be sure to exclude the query document from the return list (ie, you don't want to recommend the podcast or segment that you are querying against).
+
+**Q1)**What are the five most similar segments to segment "267:476"
+
+```
+Input: "that if we were to meet alien life at some point"
+```
+
+* For each result return the podcast name, the segment id, segment raw text,  the start time, stop time, and embedding distance
+
+**Q2)**What are the five most dissimilar segments to segment "267:476"
+
+```
+Input: "that if we were to meet alien life at some point"
+```
+
+* For each result return the podcast name, the segment id, segment raw text,  the start time, stop time, and embedding distance
+
+**Q3)** What are the five most similar segments to segment '48:511'
+
+```
+Input: "Is it is there something especially interesting and profound to you in terms of our current deep learning neural network, artificial neural network approaches and the whatever we do understand about the biological neural network."
+```
+
+* For each result return the podcast name, the segment id, segment raw text,  the start time, stop time, and embedding distance
+
+**Q4)** What are the five most similar segments to segment '51:56'
+
+```
+Input: "But what about like the fundamental physics of dark energy? Is there any understanding of what the heck it is?"
+```
+
+* For each result return the podcast name, the segment id, segment raw text,  the start time, stop time, and embedding distance
+
+**Q5)**For each of the following podcast segments, find the five most similar **podcast episodes**. Hint: You can do this by averaging over the embedding vectors within a podcast episode.
+
+    a) Segment "267:476"
+
+    b) Segment '48:511'
+
+    c) Segment '51:56'
+
+* For each result return the Podcast title and the embedding distance
+
+**Q6)**For podcast episode id = VeH7qKZr0WI**,** find the five most similar podcast episodes. Hint: you can do a similar averaging procedure as Q5
+
+```
+Input Episode: "Balaji Srinivasan: How to Fix Government, Twitter, Science, and the FDA | Lex Fridman Podcast #331"
+```
+
+* For each result return the Podcast title and the embedding distance
+
+## Deliverables
+
+You will turn in a pdf or zip with **all your code** anda pdf with the **queries and corresponding results** to questions 1-6.
+  </description>
+</assignment>

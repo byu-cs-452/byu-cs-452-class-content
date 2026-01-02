@@ -1,0 +1,37 @@
+<assignment title="GraphDB (Neo4J): Academic Papers" points_possible="30.0" due_at="{{ DUE_GRAPHDB__NEO4J___ACADEMIC_PAPERS_7 }}">
+  <description>
+This assignment is a brief intro into neo4j and how GraphDBs work. We'll start with a tutorial using a movie graph and end with the ArXiv tutorial found on here: <https://towardsdatascience.com/create-a-graph-database-in-neo4j-using-python-4172d40f89c4>
+
+Note: The code from the ArXiv tutorial is all in the Jupyter notebook [linked below](https://github.com/byu-cs-452/byu-cs-452-class-content/blob/main/notebooks/neo4j_lab.ipynb), except for the query to find the number of papers in each category. The query in the tutorial uses older and deprecated Cypher syntax, and here is new Cypher syntax that works (which is also in the notebook):
+
+```
+query_string = '''  
+MATCH (c:Category)  
+RETURN c.category, apoc.node.degree(c, "<IN_CATEGORY") AS inDegree   
+ORDER BY inDegree DESC LIMIT 20  
+'''  
+  
+top_cat_df = pd.DataFrame([dict(_) for _ in conn.query(query_string)])  
+top_cat_df.head(20)
+```
+
+**Here is a notebook to help you get started:**
+
+[neo4j\_lab.ipynb](https://github.com/byu-cs-452/byu-cs-452-class-content/blob/main/notebooks/neo4j_lab.ipynb)
+
+**Pass Off:**
+
+Turn in a pdf file with the following
+
+1. Graph of the Bacon Path for Nora Ephron using the Movies dataset - a screen shot of the Neo4j Browser with the graph is sufficient.
+2. A screen shot of the inDegree vs Category Name chart from your working jupyter notebook for the ArXiv tutorial (linked at the beginning). This is a bar chart, not a graph of all the papers.
+3. Report the **total number** of papers from all cs categories as one total amount.
+   * The query is similar to the query used in the ArXiv database tutorial but you will need to use
+     + the where clause
+     + the starts with operator
+     + either the count() or the sum() aggregation  (maybe distinct?)
+4. **The query** used to get the total number of papers in all cs categories as one total amount from number 3.
+   * Explain whether you wrote a query of all the unique papers in CS categories or whether you wrote a query that additionally counts a paper for each CS category it participates in (either is fine, I just want you to explain which one you did)! Maybe do it the other way for fun.
+5. Have fun and experiment with this technology, do something, or query something that would be interesting to you!
+  </description>
+</assignment>

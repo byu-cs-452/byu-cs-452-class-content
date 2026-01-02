@@ -1,0 +1,5 @@
+Today we will learn about Graph DBs. Graph DBs excel at modelling data where there are lots of relationships. Some good examples of relationship-first datasets include social networks on Facebook or citation networks on Google Scholar. Here is the agenda for today's class:
+
+* **Slides:** Download the Graph DB slides. [These slides](https://byu.instructure.com/courses/26599/files/9052073?module_item_id=2199535) will help you with key principles and syntax.
+* **Examples:**We will go over some example queries with a recipes database. Let's use [this Colab notebook](https://colab.research.google.com/drive/1NCVVmXt1RtvDu2N39BvQ2lBTkROs-51w?usp=sharing).
+* **Lab:** Lastly, we will work on the [GraphDB lab](https://byu.instructure.com/courses/26599/assignments/995319?module_item_id=2199532) together in class.

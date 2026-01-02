@@ -1,0 +1,29 @@
+<assignment title="ERD Tires, Stores, Employees, Customers" points_possible="20.0" due_at="{{ DUE_ERD_TIRES__STORES__EMPLOYEES__CUSTOMERS_2 }}">
+  <description>
+Your task is to create a database design for Discount Tire. You should create an Entity Relationship Diagram for the database. Use whatever tools you want to create the diagram. You should submit a pdf file of the diagram when you are finished. Your diagram should contain all the needed attributes (including primary and foreign keys) and should be able to answer the questions.
+
+Discount Tire has customers and mechanics (who may bring in their cars for repairs). You will need to keep track of their names (first and last), addresses (street, city, state, and zip), and  phone numbers. These should be sub-entities of a larger "person" table. Keep track of a mechanic's salary so we remember to pay them. We send customers coupons on their birthdays, so keep track of customers' birthdays. We don't care about mechanics' birthdays. There are multiple garages where the mechanics work. You should keep track of the address, phone number, mechanics working at the garage, and number of vehicle lifts for each location. Mechanics may work at more than one garage. Customers own cars. They may own more than one car. Cars can have multiple owners. Cars have make and model. Each car also has tires. Each tire has a unique barcode, a type (spare, winter, summer), tread (a number), brand, date installed, and finally a last rotated date. Cars have multiple tires. Tires cannot have multiple cars. Addresses should be stored in their own table (so they can consistently be added and verified with Smarty).
+
+Data must be normalized.
+
+Note: the book differentiates between a table diagram and an ERD but the terms are used interchangeably in the industry. What we specifically want in this instance is what the book refers to as a table diagram. You might consider using: <https://drawsql.app/>
+
+Some of the questions you should be able to answer:
+
+* How many staff members work at more than one garage?
+* What is the most common type of tire across a customer's cars?
+* How many mechanics get their tires from Discount Tire?
+* What's a mechanic's favorite type of tire?
+* What is the total number of tires a customer has bought?
+* How many cars has a customer brought in?
+* Who owns a given car?
+* How much do we pay mechanics on average?
+* What is the most common birthday month?
+* Which garages are able to handle five customers at the same time?
+* How many Cars have bought all of their tires from Discount tire?
+* How many tires are installed on the customer's birthday?
+* What is the average amount of tread left on the tires?
+* What is the most common brand of tire installed?
+* Can my database be expanded?
+  </description>
+</assignment>

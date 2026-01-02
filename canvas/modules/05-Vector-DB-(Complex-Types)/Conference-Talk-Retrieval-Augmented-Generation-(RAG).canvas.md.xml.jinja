@@ -1,0 +1,41 @@
+<assignment title="Conference Talk Retrieval Augmented Generation (RAG)" points_possible="25.0" due_at="{{ DUE_CONFERENCE_TALK_RETRIEVAL_AUGMENTED_GENERATION__RAG__5 }}">
+  <description>
+## Introduction
+
+In the previous Podcast Recommender assignment, we created a program that could take one podcast segment and find the most similar segments in the database. It would work by taking the segment's embedding and calculating the similarity between all the other embeddings.
+
+In this assignment, we will create a program that can take a string input, and return three Latter-day Saint General Conference talks that are the most similar. The database of conference talks and embeddings are provided, but we can give it whatever input we want. We will have to take the provided input and create an embedding out of it using the SentenceTransformer module. We will then manually code the algorithm to compare that embedding with every single conference talk embedding in the database. The three talks with the highest similarity values will be returned.
+
+In the second part of this assignment, the three conference talks will be sent to ChatGPT, and you will instruct it to answer the original string input by only referencing the talks, and not consult outside sources. Your code may be similar to how you sent queries to ChatGPT in the AI SQL project, and you will continue to use the same $5 of credits that you had bought for that assignment, there should be plenty left over. Please feel free to experiment and do the semantic search and embeddings in a way that is interesting to you. Please try multiple ways and compare and contrast results. Engineer good prompts that work really well for your wokflow.
+
+## Starter Code
+
+Linked here is the directory on the C S 452 repository containing the starter code for this project. Inside the directory, run all of the scripts in this order. You can paste in and run all four lines at once, it may take several minutes. You are also welcome to write your own code without the starter!
+
+<https://github.com/byu-cs-452/byu-cs-452-class-content/tree/main/rag>
+
+python scraper.py
+
+python free\_embeddings.py
+
+python openai\_embeddings.py
+
+python clusters.py
+
+Read through these scripts for assistance on completing this project, they contain code for converting a string into an embedding. You may reuse code from your AI SQL project to complete the ChatGPT portion.
+
+## Submission
+
+For each of the following static questions, find the three most similar free embeddings for the corresponding talks, paragraphs, and 3-clusters. Repeat this process with the OpenAI embeddings.  
+1. How can I gain a testimony of Jesus Christ?  
+2. What are some ways to deal with challenges in life and find a purpose?  
+3. How can I fix my car if it won't start?  
+Ask two questions of your own choice and include in the PDF the results.
+
+Write a few paragraphs to outline what differences the full-text, paragraph, and cluster model made on selections in the semantic search.
+
+Finally, integrate with ChatGPT to get the "G" (generation) in the RAG. Print the output of the 3 questions using just one retrieval of your choice and the static questions.  
+  
+In addition to the provided strategies can you think of another strategy for matching questions to talks that may work better? Think of one, try it out, and explain if you think it worked better or worse and why.
+  </description>
+</assignment>
