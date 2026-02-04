@@ -19,8 +19,11 @@ setupSqlDataPath = getPath("setupData.sql")
 if os.path.exists(sqliteDbPath):
     os.remove(sqliteDbPath)
 
-sqliteCon = sqlite3.connect(sqliteDbPath) # create new db
+# create new db
+sqliteCon = sqlite3.connect(sqliteDbPath) 
 sqliteCursor = sqliteCon.cursor()
+
+# read in setup files
 with (
         open(setupSqlPath) as setupSqlFile,
         open(setupSqlDataPath) as setupSqlDataFile
@@ -29,6 +32,7 @@ with (
     setupSqlScript = setupSqlFile.read()
     setupSQlDataScript = setupSqlDataFile.read()
 
+# execute setup files
 sqliteCursor.executescript(setupSqlScript) # setup tables and keys
 sqliteCursor.executescript(setupSQlDataScript) # setup tables and keys
 
@@ -44,10 +48,11 @@ with open(configPath) as configFile:
 
 openAiClient = OpenAI(api_key = config["openaiKey"])
 openAiClient.models.list() # check if the key is valid (update in config.json)
+chosen_model = "gpt-4o"
 
 def getChatGptResponse(content):
     stream = openAiClient.chat.completions.create(
-        model="gpt-4o",
+        model=chosen_model,
         messages=[{"role": "user", "content": content}],
         stream=True,
     )
@@ -69,6 +74,7 @@ strategies = {
                    " Who doesn't have a way for us to text them? " +
                    " \nSELECT p.person_id, p.name\nFROM person p\nLEFT JOIN phone ph ON p.person_id = ph.person_id AND ph.can_recieve_sms = 1\nWHERE ph.phone_id IS NULL;\n " +
                    commonSqlOnlyRequest)
+     # TODO add strategies as descirbed in the paper (multi-domain)              
 }
 
 questions = [
@@ -83,15 +89,23 @@ questions = [
     # "I need insert sql into my tables can you provide good unique data?"
 ]
 
+
+# use the markdown for the sql syntax to find the SQL query
 def sanitizeForJustSql(value):
-    gptStartSqlMarker = "```sql"
+    gptStartSqlMarker = "```"
     gptEndSqlMarker = "```"
     if gptStartSqlMarker in value:
-        value = value.split(gptStartSqlMarker)[1]
+        # Split at the first ``` and take everything after it
+        value = value.split(gptStartSqlMarker, 1)[1]
+        # Find the newline after the language identifier (sql, sqlite, etc.)
+        newline_index = value.find("\n")
+        if newline_index != -1:
+            value = value[newline_index + 1:]
     if gptEndSqlMarker in value:
-        value = value.split(gptEndSqlMarker)[0]
+        # Split at the closing ``` and take everything before it
+        value = value.split(gptEndSqlMarker, 1)[0]
 
-    return value
+    return value.strip()
 
 for strategy in strategies:
     responses = {"strategy": strategy, "prompt_prefix": strategies[strategy]}
@@ -113,8 +127,10 @@ for strategy in strategies:
             queryRawResponse = str(runSql(sqlSyntaxResponse))
             print("Query Raw Response:")
             print(queryRawResponse)
+
+            # TODO this prompt is insufficient. ChatGPT doesn't have all the context that it needs.
+            # What context would help the friendly response be more successful? Can you fix it?
             friendlyResultsPrompt = "I asked a question \"" + question +"\" and the response was \""+queryRawResponse+"\" Please, just give a concise response in a more friendly way? Please do not give any other suggests or chatter."
-            # betterFriendlyResultsPrompt = "I asked a question: \"" + question +"\" and I queried this database " + setupSqlScript + " with this query " + sqlSyntaxResponse + ". The query returned the results data: \""+queryRawResponse+"\". Could you concisely answer my question using the results data?"
             friendlyResponse = getChatGptResponse(friendlyResultsPrompt)
             print("Friendly Response:")
             print(friendlyResponse)
