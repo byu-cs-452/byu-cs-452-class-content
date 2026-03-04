@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redis Work Queue — Request Flow Animation</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 30px 40px 40px;
+    }
+
+    h1 {
+      text-align: center;
+      font-size: 28px;
+      font-weight: 800;
+      margin-bottom: 6px;
+      background: linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.5px;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #64748b;
+      font-size: 14px;
+      margin-bottom: 30px;
+    }
+
+    /* ==== DIAGRAM AREA ==== */
+    .diagram {
+      position: relative;
+      width: 100%;
+      height: 320px;
+      margin-bottom: 4px;
+    }
+
+    /* ==== NODES ==== */
+    .node {
+      position: absolute;
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      transition: box-shadow 0.5s ease, transform 0.3s ease, border-color 0.5s ease;
+      border: 2px solid transparent;
+      z-index: 2;
+    }
+
+    .node.active {
+      transform: scale(1.04);
+      z-index: 5;
+    }
+
+    .node-icon {
+      font-size: 32px;
+      margin-bottom: 6px;
+    }
+
+    .node-label {
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: -0.3px;
+    }
+
+    .node-sub {
+      font-size: 11px;
+      color: #94a3b8;
+      font-family: 'JetBrains Mono', monospace;
+      margin-top: 2px;
+    }
+
+    /* USER */
+    .node-user {
+      left: 30px;
+      top: 150px;
+      width: 150px;
+      height: 130px;
+      background: linear-gradient(135deg, #1e293b, #1e3a5f);
+      border-color: #334155;
+    }
+
+    .node-user.active {
+      border-color: #60a5fa;
+      box-shadow: 0 0 30px rgba(96, 165, 250, 0.3);
+    }
+
+    /* WEB SERVER */
+    .node-web {
+      left: 280px;
+      top: 30px;
+      width: 180px;
+      height: 140px;
+      background: linear-gradient(135deg, #1e293b, #2e1e4a);
+      border-color: #334155;
+    }
+
+    .node-web.active {
+      border-color: #a78bfa;
+      box-shadow: 0 0 30px rgba(167, 139, 250, 0.3);
+    }
+
+    /* REDIS */
+    .node-redis {
+      left: 530px;
+      top: 130px;
+      width: 170px;
+      height: 160px;
+      background: linear-gradient(135deg, #1e293b, #3b1e1e);
+      border-color: #334155;
+    }
+
+    .node-redis.active {
+      border-color: #f87171;
+      box-shadow: 0 0 30px rgba(248, 113, 113, 0.3);
+    }
+
+    /* WORKER */
+    .node-worker {
+      left: 790px;
+      top: 30px;
+      width: 180px;
+      height: 140px;
+      background: linear-gradient(135deg, #1e293b, #1e3b2e);
+      border-color: #334155;
+    }
+
+    .node-worker.active {
+      border-color: #4ade80;
+      box-shadow: 0 0 30px rgba(74, 222, 128, 0.3);
+    }
+
+    /* RESULT NODE (hidden, kept for packet animation target) */
+    .node-result {
+      left: 100px;
+      top: 350px;
+      width: 60px;
+      height: 60px;
+      background: transparent;
+      border-color: transparent;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* ==== REDIS INTERNALS ==== */
+    .redis-contents {
+      position: relative;
+      margin-left: auto;
+      margin-right: 40px;
+      max-width: 480px;
+      min-height: 60px;
+      margin-top: 0;
+      margin-bottom: 8px;
+      background: #1a1e2e;
+      border: 1px solid #2d3348;
+      border-radius: 12px;
+      padding: 14px 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      z-index: 3;
+      transition: all 0.4s ease;
+    }
+
+    .redis-title {
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #f87171;
+      margin-bottom: 8px;
+    }
+
+    .redis-entry {
+      background: #0f1117;
+      border: 1px solid #2d3348;
+      border-radius: 8px;
+      padding: 8px 12px;
+      margin-bottom: 6px;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.4s ease, transform 0.4s ease, background 0.3s ease;
+    }
+
+    .redis-entry.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .redis-entry.highlight {
+      border-color: #fbbf24;
+      background: #1a1a0f;
+    }
+
+    .redis-key {
+      color: #fbbf24;
+      font-weight: 600;
+    }
+
+    .redis-type {
+      color: #64748b;
+      font-size: 10px;
+      margin-left: 6px;
+    }
+
+    .redis-value {
+      color: #94a3b8;
+      margin-top: 4px;
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* ==== FLOATING DATA PACKETS ==== */
+    .packet {
+      position: absolute;
+      z-index: 10;
+      pointer-events: none;
+      opacity: 0;
+      transition: none;
+    }
+
+    .packet-image {
+      width: 56px;
+      height: 56px;
+      border-radius: 8px;
+      border: 2px solid #60a5fa;
+      box-shadow: 0 0 20px rgba(96, 165, 250, 0.4);
+      object-fit: cover;
+    }
+
+    .packet-json {
+      background: #1a1e2e;
+      border: 1px solid #4ade80;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: #4ade80;
+      box-shadow: 0 0 20px rgba(74, 222, 128, 0.3);
+      white-space: nowrap;
+    }
+
+    .packet-uuid {
+      background: #1a1e2e;
+      border: 1px solid #fbbf24;
+      border-radius: 8px;
+      padding: 4px 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: #fbbf24;
+      box-shadow: 0 0 15px rgba(251, 191, 36, 0.3);
+      white-space: nowrap;
+    }
+
+    /* ==== SVG ARROWS ==== */
+    svg.arrows {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .arrow-path {
+      fill: none;
+      stroke: #334155;
+      stroke-width: 2;
+      stroke-dasharray: 6 4;
+      transition: stroke 0.5s ease, stroke-width 0.3s ease;
+    }
+
+    .arrow-path.active {
+      stroke-width: 3;
+      stroke-dasharray: none;
+      filter: drop-shadow(0 0 6px currentColor);
+    }
+
+    .arrow-path.a1.active {
+      stroke: #60a5fa;
+    }
+
+    .arrow-path.a2.active {
+      stroke: #a78bfa;
+    }
+
+    .arrow-path.a3.active {
+      stroke: #f87171;
+    }
+
+    .arrow-path.a4.active {
+      stroke: #4ade80;
+    }
+
+    .arrow-path.a5.active {
+      stroke: #fbbf24;
+    }
+
+    .arrow-path.a6.active {
+      stroke: #f472b6;
+    }
+
+    /* ==== STEP INDICATOR ==== */
+    .steps {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+
+    .step-dot {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+      background: #1e293b;
+      border: 2px solid #334155;
+      color: #64748b;
+      transition: all 0.4s ease;
+      cursor: pointer;
+    }
+
+    .step-dot.active {
+      border-color: #60a5fa;
+      color: #fff;
+      background: #1e3a5f;
+      box-shadow: 0 0 15px rgba(96, 165, 250, 0.3);
+    }
+
+    .step-dot.done {
+      border-color: #4ade80;
+      color: #4ade80;
+      background: #0f2a1a;
+    }
+
+    /* ==== NARRATION ==== */
+    .narration-box {
+      background: #1a1e2e;
+      border: 1px solid #2d3348;
+      border-radius: 14px;
+      padding: 18px 24px;
+      margin-bottom: 18px;
+      min-height: 70px;
+      transition: border-color 0.4s ease;
+    }
+
+    .narration-step {
+      font-weight: 700;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+    }
+
+    .narration-text {
+      font-size: 15px;
+      line-height: 1.6;
+      color: #cbd5e1;
+    }
+
+    .narration-code {
+      font-family: 'JetBrains Mono', monospace;
+      background: #0f1117;
+      border: 1px solid #2d3348;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #a78bfa;
+      overflow-x: auto;
+    }
+
+    /* ==== CONTROLS ==== */
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .btn {
+      padding: 10px 28px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      background: #1e293b;
+      color: #e2e8f0;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn:hover {
+      background: #2d3a4f;
+      border-color: #60a5fa;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      border-color: #6366f1;
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, #60a5fa, #818cf8);
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    /* auto-play toggle */
+    .auto-play {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+
+    .auto-play input {
+      accent-color: #6366f1;
+    }
+
+    /* ==== KEY/LEGEND at bottom ==== */
+    .legend {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      margin-top: 20px;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: #94a3b8;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Redis Work Queue — Request Flow</h1>
+    <p class="subtitle">Tracing the journey of a single image classification request</p>
+
+    <!-- Step dots -->
+    <div class="steps" id="stepDots"></div>
+
+    <!-- Diagram -->
+    <div class="diagram" id="diagram">
+      <!-- SVG Arrows -->
+      <svg class="arrows" width="100%" height="100%">
+        <defs>
+          <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#60a5fa" />
+          </marker>
+          <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#a78bfa" />
+          </marker>
+          <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#f87171" />
+          </marker>
+          <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#4ade80" />
+          </marker>
+          <marker id="arrowYellow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#fbbf24" />
+          </marker>
+          <marker id="arrowPink" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#f472b6" />
+          </marker>
+        </defs>
+
+        <!-- 1: Client right edge → Web Server left edge -->
+        <path class="arrow-path a1" id="arrow1" d="M 180,195 C 220,170 250,120 280,100" marker-end="url(#arrowBlue)" />
+
+        <!-- 2: Web Server right edge → Redis top -->
+        <path class="arrow-path a2" id="arrow2" d="M 460,100 C 490,110 520,120 530,140"
+          marker-end="url(#arrowPurple)" />
+
+        <!-- 3: Redis right edge → Worker left edge -->
+        <path class="arrow-path a3" id="arrow3" d="M 700,180 C 730,150 760,120 790,100" marker-end="url(#arrowRed)" />
+
+        <!-- 4: Worker bottom-left → Redis right-bottom -->
+        <path class="arrow-path a4" id="arrow4" d="M 800,170 C 780,220 730,260 700,260" marker-end="url(#arrowGreen)" />
+
+        <!-- 5+6: Redis left-bottom → curves down → Client bottom (single return arrow) -->
+        <path class="arrow-path a5 a6" id="arrow56" d="M 530,270 C 460,310 240,310 105,280"
+          marker-end="url(#arrowPink)" />
+      </svg>
+
+      <!-- Nodes -->
+      <div class="node node-user" id="nodeUser">
+        <div class="node-icon">👤</div>
+        <div class="node-label">Client</div>
+        <div class="node-sub">simple_request.py</div>
+      </div>
+
+      <div class="node node-web" id="nodeWeb">
+        <div class="node-icon">🌐</div>
+        <div class="node-label">Web Server</div>
+        <div class="node-sub">run_web_server.py</div>
+      </div>
+
+      <div class="node node-redis" id="nodeRedis">
+        <div class="node-icon">🔴</div>
+        <div class="node-label">Redis</div>
+        <div class="node-sub">Message Broker</div>
+      </div>
+
+      <div class="node node-worker" id="nodeWorker">
+        <div class="node-icon">🧠</div>
+        <div class="node-label">Worker</div>
+        <div class="node-sub">run_model_server.py</div>
+      </div>
+
+      <div class="node node-result" id="nodeResult"></div>
+
+      <!-- Floating packets (animated) -->
+      <div class="packet" id="packetImg">
+        <img class="packet-image" src="../work_queue_example/castle_image.jpg" alt="castle"
+          onerror="this.style.display='none'" />
+      </div>
+      <div class="packet" id="packetUuid">
+        <div class="packet-uuid">a3f8-...-d7b2</div>
+      </div>
+      <div class="packet" id="packetJson">
+        <div class="packet-json">{"castle": 0.87, "church": 0.05}</div>
+      </div>
+    </div>
+
+    <!-- Redis internals -->
+    <div class="redis-contents" id="redisContents">
+      <div class="redis-title">📦 Redis Database State</div>
+      <div class="redis-entry" id="rQueue">
+        <span class="redis-key">image_queue</span>
+        <span class="redis-type">LIST</span>
+        <div class="redis-value">(empty)</div>
+      </div>
+      <div class="redis-entry" id="rResult">
+        <span class="redis-key">a3f8b1c9-...-d7b2</span>
+        <span class="redis-type">STRING</span>
+        <div class="redis-value">[{"label":"castle","probability":0.8742}, ...]</div>
+      </div>
+    </div>
+
+    <!-- Narration -->
+    <div class="narration-box" id="narration">
+      <div class="narration-step" id="narrationStep" style="color: #60a5fa;">Ready</div>
+      <div class="narration-text" id="narrationText">Click <strong>Next Step</strong> to trace a single image
+        classification request through the system.</div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls">
+      <button class="btn" id="btnPrev" disabled>← Previous</button>
+      <button class="btn btn-primary" id="btnNext">Next Step →</button>
+      <button class="btn" id="btnReset">Reset</button>
+      <label class="auto-play">
+        <input type="checkbox" id="autoPlay"> Auto-play (3s)
+      </label>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-dot" style="background:#60a5fa"></div> Client
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:#a78bfa"></div> Web Server
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:#f87171"></div> Redis
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:#4ade80"></div> Worker (Keras)
+      </div>
+      <div class="legend-item">
+        <div class="legend-dot" style="background:#fbbf24"></div> Result
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STEPS = [
+      {
+        title: "Step 1 — Client Sends Image",
+        color: "#60a5fa",
+        text: `The client (<code>simple_request.py</code>) opens <strong>castle_image.jpg</strong>, wraps it in an HTTP POST multipart form, and sends it to the Flask web server at <code>/predict</code>.`,
+        code: `image = open("castle_image.jpg", "rb").read()\npayload = {"image": image}\nr = requests.post("http://127.0.0.1:5000/predict", files=payload)`,
+        activeNodes: ["nodeUser", "nodeWeb"],
+        activeArrows: ["arrow1"],
+        packet: { id: "packetImg", from: "nodeUser", to: "nodeWeb" },
+        redis: { queue: false, result: false, queueText: "(empty)" }
+      },
+      {
+        title: "Step 2 — Web Server Queues Job",
+        color: "#a78bfa",
+        text: `The web server receives the image, preprocesses it (resize to 224×224, base64 encode), generates a <strong>UUID</strong> key, and pushes a JSON object <code>{"id": uuid, "image": base64}</code> onto the <strong>image_queue</strong> list via <code>RPUSH</code>.`,
+        code: `k = str(uuid.uuid4())  # "a3f8b1c9-...-d7b2"\nimage = helpers.base64_encode_image(image)\nd = {"id": k, "image": image}\ndb.rpush("image_queue", json.dumps(d))`,
+        activeNodes: ["nodeWeb", "nodeRedis"],
+        activeArrows: ["arrow2"],
+        packet: { id: "packetUuid", from: "nodeWeb", to: "nodeRedis" },
+        redis: { queue: true, result: false, queueText: `[{"id":"a3f8b1c9-...-d7b2", "image":"<base64>"}]` }
+      },
+      {
+        title: "Step 3 — Worker Pops from Queue",
+        color: "#f87171",
+        text: `The model server continuously polls Redis. It <code>LRANGE</code>s (or <code>LPOP</code>s) up to <strong>BATCH_SIZE</strong> items from <code>image_queue</code>, decodes each base64 image back into a NumPy array, and builds a batch for classification.`,
+        code: `queue = db.lrange("image_queue", 0, BATCH_SIZE - 1)\nfor q in queue:\n    q = json.loads(q)\n    image = helpers.base64_decode_image(q["image"], ...)`,
+        activeNodes: ["nodeRedis", "nodeWorker"],
+        activeArrows: ["arrow3"],
+        packet: { id: "packetImg", from: "nodeRedis", to: "nodeWorker" },
+        redis: { queue: true, result: false, queueText: `(processing...) → will be trimmed` }
+      },
+      {
+        title: "Step 4 — Worker Classifies & Stores Result",
+        color: "#4ade80",
+        text: `The worker runs the image through <strong>ResNet50</strong>, gets prediction labels and probabilities, and stores the JSON result in Redis as a <strong>STRING</strong> using the UUID as the key via <code>SET</code>. Then it trims the processed items from the queue.`,
+        code: `preds = model.predict(batch)\nresults = imagenet_utils.decode_predictions(preds)\n# ...\ndb.set("a3f8b1c9-...-d7b2", json.dumps(output))\ndb.ltrim("image_queue", len(imageIDs), -1)`,
+        activeNodes: ["nodeWorker", "nodeRedis"],
+        activeArrows: ["arrow4"],
+        packet: { id: "packetJson", from: "nodeWorker", to: "nodeRedis" },
+        redis: { queue: false, result: true, queueText: "(empty — trimmed)" }
+      },
+      {
+        title: "Step 5 — Web Server Finds Result",
+        color: "#fbbf24",
+        text: `Meanwhile, the web server has been <strong>polling</strong> Redis in a loop, calling <code>db.get(uuid)</code> every 0.25 seconds. When the result key appears, it reads the JSON, deletes the key from Redis, and prepares the HTTP response.`,
+        code: `while True:\n    output = db.get("a3f8b1c9-...-d7b2")\n    if output is not None:\n        data["predictions"] = json.loads(output)\n        db.delete("a3f8b1c9-...-d7b2")\n        break\n    time.sleep(0.25)`,
+        activeNodes: ["nodeRedis", "nodeWeb"],
+        activeArrows: ["arrow56"],
+        packet: { id: "packetJson", from: "nodeRedis", to: "nodeWeb" },
+        redis: { queue: false, result: true, resultHighlight: true, queueText: "(empty)" }
+      },
+      {
+        title: "Step 6 — Response Returned to Client",
+        color: "#f472b6",
+        text: `The web server returns the JSON prediction results to the client. The client displays the top-5 classifications with confidence scores. The castle image was identified as a <strong>castle</strong> with 87.42% confidence! 🏰`,
+        code: `# Client receives:\n{\n  "success": true,\n  "predictions": [\n    {"label": "castle", "probability": 0.8742},\n    {"label": "church", "probability": 0.0543},\n    {"label": "palace", "probability": 0.0298}\n  ]\n}`,
+        activeNodes: ["nodeWeb", "nodeUser"],
+        activeArrows: ["arrow56"],
+        packet: { id: "packetJson", from: "nodeWeb", to: "nodeUser" },
+        redis: { queue: false, result: false, queueText: "(empty)" }
+      }
+    ];
+
+    let currentStep = -1;
+    let autoPlayTimer = null;
+
+    // Build step dots
+    const dotsContainer = document.getElementById("stepDots");
+    STEPS.forEach((_, i) => {
+      const dot = document.createElement("div");
+      dot.className = "step-dot";
+      dot.textContent = i + 1;
+      dot.addEventListener("click", () => goToStep(i));
+      dotsContainer.appendChild(dot);
+    });
+
+    function clearAll() {
+      document.querySelectorAll(".node").forEach(n => n.classList.remove("active"));
+      document.querySelectorAll(".arrow-path").forEach(a => a.classList.remove("active"));
+      document.querySelectorAll(".packet").forEach(p => { p.style.opacity = "0"; });
+      document.getElementById("rQueue").classList.remove("visible");
+      document.getElementById("rResult").classList.remove("visible", "highlight");
+    }
+
+    function animatePacket(packetId, fromId, toId) {
+      const packet = document.getElementById(packetId);
+      const from = document.getElementById(fromId);
+      const to = document.getElementById(toId);
+      if (!packet || !from || !to) return;
+
+      const diagram = document.getElementById("diagram");
+      const dRect = diagram.getBoundingClientRect();
+      const fRect = from.getBoundingClientRect();
+      const tRect = to.getBoundingClientRect();
+
+      const startX = fRect.left + fRect.width / 2 - dRect.left - 28;
+      const startY = fRect.top + fRect.height / 2 - dRect.top - 28;
+      const endX = tRect.left + tRect.width / 2 - dRect.left - 28;
+      const endY = tRect.top + tRect.height / 2 - dRect.top - 28;
+
+      packet.style.transition = "none";
+      packet.style.left = startX + "px";
+      packet.style.top = startY + "px";
+      packet.style.opacity = "1";
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          packet.style.transition = "left 1s ease-in-out, top 1s ease-in-out";
+          packet.style.left = endX + "px";
+          packet.style.top = endY + "px";
+        });
+      });
+    }
+
+    function goToStep(idx) {
+      if (idx < 0 || idx >= STEPS.length) return;
+      currentStep = idx;
+      const step = STEPS[idx];
+
+      clearAll();
+
+      // Activate nodes
+      step.activeNodes.forEach(id => document.getElementById(id).classList.add("active"));
+
+      // Activate arrows
+      step.activeArrows.forEach(id => document.getElementById(id).classList.add("active"));
+
+      // Show result node if needed
+      if (step.showResult) {
+        document.getElementById("nodeResult").classList.add("visible");
+      }
+
+      // Animate packet
+      if (step.packet) {
+        setTimeout(() => animatePacket(step.packet.id, step.packet.from, step.packet.to), 200);
+      }
+
+      // Redis state
+      const rQueue = document.getElementById("rQueue");
+      const rResult = document.getElementById("rResult");
+      if (step.redis.queue) {
+        rQueue.classList.add("visible");
+        rQueue.querySelector(".redis-value").textContent = step.redis.queueText || "";
+      }
+      if (step.redis.result) {
+        rResult.classList.add("visible");
+        if (step.redis.resultHighlight) rResult.classList.add("highlight");
+      }
+
+      // Narration
+      document.getElementById("narrationStep").style.color = step.color;
+      document.getElementById("narrationStep").textContent = step.title;
+      document.getElementById("narrationText").innerHTML = step.text +
+        (step.code ? `<div class="narration-code"><pre>${step.code}</pre></div>` : "");
+
+      // Update dots
+      document.querySelectorAll(".step-dot").forEach((dot, i) => {
+        dot.className = "step-dot";
+        if (i < idx) dot.classList.add("done");
+        if (i === idx) dot.classList.add("active");
+      });
+
+      // Button states
+      document.getElementById("btnPrev").disabled = (idx <= 0);
+      document.getElementById("btnNext").disabled = (idx >= STEPS.length - 1);
+    }
+
+    document.getElementById("btnNext").addEventListener("click", () => {
+      if (currentStep < STEPS.length - 1) goToStep(currentStep + 1);
+    });
+
+    document.getElementById("btnPrev").addEventListener("click", () => {
+      if (currentStep > 0) goToStep(currentStep - 1);
+    });
+
+    document.getElementById("btnReset").addEventListener("click", () => {
+      currentStep = -1;
+      clearAll();
+      document.querySelectorAll(".step-dot").forEach(d => d.className = "step-dot");
+      document.getElementById("narrationStep").style.color = "#60a5fa";
+      document.getElementById("narrationStep").textContent = "Ready";
+      document.getElementById("narrationText").innerHTML = 'Click <strong>Next Step</strong> to trace a single image classification request through the system.';
+      document.getElementById("btnPrev").disabled = true;
+      document.getElementById("btnNext").disabled = false;
+    });
+
+    // Auto-play
+    document.getElementById("autoPlay").addEventListener("change", function () {
+      if (this.checked) {
+        if (currentStep < 0) goToStep(0);
+        autoPlayTimer = setInterval(() => {
+          if (currentStep < STEPS.length - 1) {
+            goToStep(currentStep + 1);
+          } else {
+            clearInterval(autoPlayTimer);
+            document.getElementById("autoPlay").checked = false;
+          }
+        }, 3000);
+      } else {
+        clearInterval(autoPlayTimer);
+      }
+    });
+
+    // Keyboard controls
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight" || e.key === " ") {
+        e.preventDefault();
+        if (currentStep < STEPS.length - 1) goToStep(currentStep + 1);
+      } else if (e.key === "ArrowLeft") {
+        if (currentStep > 0) goToStep(currentStep - 1);
+      }
+    });
+  </script>
+</body>
+
+</html>
