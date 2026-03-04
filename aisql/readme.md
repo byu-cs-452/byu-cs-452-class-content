@@ -2,7 +2,7 @@
 
 In this project you will design a database and create a natural language interface to it using AI.  
 This should take about 6 hours if you want to code from scratch. (As a TA doing this project for the first time, it took me a little longer than this to complete by myself from scratch, but in groups you can definitely finish in that time)   
-Below are some instructions and you can check the examples folder to get some ideas on where you might start.
+Below are some instructions and you can check the examples folder to get some ideas on where you might start. There is also sample_post.md in this directory that you could look at to see what your final submission should look like.
 
 ## Some Questions to Ask Yourself Throughout This Project:
 
