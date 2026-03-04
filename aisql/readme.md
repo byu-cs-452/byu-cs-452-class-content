@@ -1,7 +1,7 @@
 # AI + SQL Natural Language Interface Project
 
 In this project you will design a database and create a natural language interface to it using AI.  
-This Should take about 6 hrs if you want to code from scratch. (As a TA doing this pproject for the first time, It took me ~10 hours to complete by myself from scratch)   
+This should take about 6 hours if you want to code from scratch. (As a TA doing this project for the first time, it took me a little longer than this to complete by myself from scratch, but in groups you can definitely finish in that time)   
 Below are some instructions and you can check the examples folder to get some ideas on where you might start.
 
 ## Some Questions to Ask Yourself Throughout This Project:
@@ -19,7 +19,7 @@ Below are some instructions and you can check the examples folder to get some id
 
 * **OpenAI Setup**: Create a new OpenAI Account or pay the $5. This should be enough to complete the assignment. (Cost me 29 cents in including all my debugging)
 
-* **Developer Setup**: Setup a developer API KEY, find your "ORGID". Learn how to interface with OpenAI. Learn about different models and their costs (GPT 3.5, davinci, GPT 4, etc). Search google to find more information.
+* **Developer Setup**: Setup a developer API KEY, find your "ORGID". Learn how to interface with OpenAI. Learn about different models and their costs (GPT 3.5, davinci, GPT 4, etc). Search Google to find more information.
 
 ---
 
@@ -55,7 +55,7 @@ Below are some instructions and you can check the examples folder to get some id
 
   * Contribute to the database design (maybe a table, foreign key, attribute, something!)
 
-  * Execute the program with an API key that they individually generated in open AI.
+  * Execute the program with an API key that they individually generated in OpenAI.
 
   * Experiment with a question that they personally came up with!
 
