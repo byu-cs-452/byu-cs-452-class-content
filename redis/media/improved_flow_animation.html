@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Improved Architecture — 2 Workers + Pub/Sub Notifications</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0f1117;
+            color: #e2e8f0;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 30px 40px 40px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 28px;
+            font-weight: 800;
+            margin-bottom: 6px;
+            background: linear-gradient(135deg, #4ade80, #60a5fa, #fbbf24);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #64748b;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+
+        .badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #065f46, #064e3b);
+            border: 1px solid #10b981;
+            border-radius: 20px;
+            padding: 3px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #34d399;
+            letter-spacing: 0.5px;
+        }
+
+        /* ==== DIAGRAM AREA ==== */
+        .diagram {
+            position: relative;
+            width: 100%;
+            height: 360px;
+            margin-bottom: 4px;
+        }
+
+        /* ==== NODES ==== */
+        .node {
+            position: absolute;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            transition: box-shadow 0.5s ease, transform 0.3s ease, border-color 0.5s ease;
+            border: 2px solid transparent;
+            z-index: 2;
+        }
+
+        .node.active {
+            transform: scale(1.04);
+            z-index: 5;
+        }
+
+        .node-icon {
+            font-size: 28px;
+            margin-bottom: 4px;
+        }
+
+        .node-label {
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: -0.3px;
+        }
+
+        .node-sub {
+            font-size: 10px;
+            color: #94a3b8;
+            font-family: 'JetBrains Mono', monospace;
+            margin-top: 2px;
+        }
+
+        /* CLIENT */
+        .node-user {
+            left: 20px;
+            top: 120px;
+            width: 140px;
+            height: 120px;
+            background: linear-gradient(135deg, #1e293b, #1e3a5f);
+            border-color: #334155;
+        }
+
+        .node-user.active {
+            border-color: #60a5fa;
+            box-shadow: 0 0 30px rgba(96, 165, 250, 0.3);
+        }
+
+        /* WEB SERVER */
+        .node-web {
+            left: 250px;
+            top: 20px;
+            width: 160px;
+            height: 130px;
+            background: linear-gradient(135deg, #1e293b, #2e1e4a);
+            border-color: #334155;
+        }
+
+        .node-web.active {
+            border-color: #a78bfa;
+            box-shadow: 0 0 30px rgba(167, 139, 250, 0.3);
+        }
+
+        /* REDIS */
+        .node-redis {
+            left: 480px;
+            top: 90px;
+            width: 160px;
+            height: 150px;
+            background: linear-gradient(135deg, #1e293b, #3b1e1e);
+            border-color: #334155;
+        }
+
+        .node-redis.active {
+            border-color: #f87171;
+            box-shadow: 0 0 30px rgba(248, 113, 113, 0.3);
+        }
+
+        /* WORKER 1 */
+        .node-w1 {
+            left: 730px;
+            top: 10px;
+            width: 155px;
+            height: 120px;
+            background: linear-gradient(135deg, #1e293b, #1e3b2e);
+            border-color: #334155;
+        }
+
+        .node-w1.active {
+            border-color: #4ade80;
+            box-shadow: 0 0 30px rgba(74, 222, 128, 0.3);
+        }
+
+        /* WORKER 2 */
+        .node-w2 {
+            left: 730px;
+            top: 160px;
+            width: 155px;
+            height: 120px;
+            background: linear-gradient(135deg, #1e293b, #2e3b1e);
+            border-color: #334155;
+        }
+
+        .node-w2.active {
+            border-color: #facc15;
+            box-shadow: 0 0 30px rgba(250, 204, 21, 0.3);
+        }
+
+        /* reject flash for worker 2 */
+        .node-w2.rejected {
+            border-color: #ef4444;
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.4);
+            animation: rejectShake 0.4s ease;
+        }
+
+        @keyframes rejectShake {
+
+            0%,
+            100% {
+                transform: translateX(0);
+            }
+
+            20% {
+                transform: translateX(-4px);
+            }
+
+            40% {
+                transform: translateX(4px);
+            }
+
+            60% {
+                transform: translateX(-3px);
+            }
+
+            80% {
+                transform: translateX(3px);
+            }
+        }
+
+        /* Nil badge */
+        .nil-badge {
+            position: absolute;
+            left: 740px;
+            top: 285px;
+            background: #3b1e1e;
+            border: 1px solid #ef4444;
+            border-radius: 8px;
+            padding: 3px 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: #ef4444;
+            font-weight: 600;
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            z-index: 10;
+        }
+
+        .nil-badge.visible {
+            opacity: 1;
+        }
+
+        /* Notification flash */
+        .notif-badge {
+            position: absolute;
+            left: 310px;
+            top: 155px;
+            background: #1e3b2e;
+            border: 1px solid #4ade80;
+            border-radius: 8px;
+            padding: 4px 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: #4ade80;
+            font-weight: 600;
+            opacity: 0;
+            transition: opacity 0.4s ease;
+            z-index: 10;
+            white-space: nowrap;
+        }
+
+        .notif-badge.visible {
+            opacity: 1;
+        }
+
+        .saved-badge {
+            position: absolute;
+            right: 10px;
+            top: 300px;
+            background: linear-gradient(135deg, #1a1e2e, #2a2510);
+            border: 2px solid #fbbf24;
+            border-radius: 12px;
+            padding: 10px 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: #fbbf24;
+            opacity: 0;
+            transform: scale(0.8);
+            transition: opacity 0.5s ease, transform 0.4s ease;
+            z-index: 10;
+            white-space: nowrap;
+            box-shadow: 0 0 25px rgba(251, 191, 36, 0.25);
+            text-align: center;
+            line-height: 1.5;
+        }
+
+        .saved-badge.visible {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .saved-badge .star {
+            font-size: 18px;
+        }
+
+        .saved-badge .count {
+            color: #4ade80;
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        /* ==== REDIS INTERNALS ==== */
+        .redis-contents {
+            position: relative;
+            margin-left: auto;
+            margin-right: 40px;
+            max-width: 520px;
+            min-height: 60px;
+            margin-top: 0;
+            margin-bottom: 8px;
+            background: #1a1e2e;
+            border: 1px solid #2d3348;
+            border-radius: 12px;
+            padding: 14px 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            z-index: 3;
+            transition: all 0.4s ease;
+        }
+
+        .redis-title {
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #f87171;
+            margin-bottom: 8px;
+        }
+
+        .redis-entry {
+            background: #0f1117;
+            border: 1px solid #2d3348;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            opacity: 0;
+            transform: translateY(8px);
+            transition: opacity 0.4s ease, transform 0.4s ease, background 0.3s ease;
+        }
+
+        .redis-entry.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .redis-entry.highlight {
+            border-color: #fbbf24;
+            background: #1a1a0f;
+        }
+
+        .redis-entry.sub-highlight {
+            border-color: #4ade80;
+            background: #0f1a0f;
+        }
+
+        .redis-key {
+            color: #fbbf24;
+            font-weight: 600;
+        }
+
+        .redis-type {
+            color: #64748b;
+            font-size: 10px;
+            margin-left: 6px;
+        }
+
+        .redis-value {
+            color: #94a3b8;
+            margin-top: 4px;
+            font-size: 11px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* ==== FLOATING DATA PACKETS ==== */
+        .packet {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none;
+            opacity: 0;
+            transition: none;
+        }
+
+        .packet-image {
+            width: 50px;
+            height: 50px;
+            border-radius: 8px;
+            border: 2px solid #60a5fa;
+            box-shadow: 0 0 20px rgba(96, 165, 250, 0.4);
+            object-fit: cover;
+        }
+
+        .packet-json {
+            background: #1a1e2e;
+            border: 1px solid #4ade80;
+            border-radius: 8px;
+            padding: 5px 9px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: #4ade80;
+            box-shadow: 0 0 20px rgba(74, 222, 128, 0.3);
+            white-space: nowrap;
+        }
+
+        .packet-uuid {
+            background: #1a1e2e;
+            border: 1px solid #fbbf24;
+            border-radius: 8px;
+            padding: 3px 9px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: #fbbf24;
+            box-shadow: 0 0 15px rgba(251, 191, 36, 0.3);
+            white-space: nowrap;
+        }
+
+        .packet-notif {
+            background: #0f1a0f;
+            border: 1px solid #4ade80;
+            border-radius: 8px;
+            padding: 3px 9px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            color: #4ade80;
+            box-shadow: 0 0 15px rgba(74, 222, 128, 0.3);
+            white-space: nowrap;
+        }
+
+        /* ==== SVG ARROWS ==== */
+        svg.arrows {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .arrow-path {
+            fill: none;
+            stroke: #334155;
+            stroke-width: 2;
+            stroke-dasharray: 6 4;
+            transition: stroke 0.5s ease, stroke-width 0.3s ease;
+        }
+
+        .arrow-path.active {
+            stroke-width: 3;
+            stroke-dasharray: none;
+            filter: drop-shadow(0 0 6px currentColor);
+        }
+
+        .arrow-path.a1.active {
+            stroke: #60a5fa;
+        }
+
+        .arrow-path.a2.active {
+            stroke: #a78bfa;
+        }
+
+        .arrow-path.a3.active {
+            stroke: #4ade80;
+        }
+
+        .arrow-path.a3b.active {
+            stroke: #facc15;
+        }
+
+        .arrow-path.a4.active {
+            stroke: #4ade80;
+        }
+
+        .arrow-path.a5.active {
+            stroke: #f472b6;
+        }
+
+        .arrow-path.a6.active {
+            stroke: #f472b6;
+        }
+
+        /* ==== STEP INDICATOR ==== */
+        .steps {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .step-dot {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+            background: #1e293b;
+            border: 2px solid #334155;
+            color: #64748b;
+            transition: all 0.4s ease;
+            cursor: pointer;
+        }
+
+        .step-dot.active {
+            border-color: #60a5fa;
+            color: #fff;
+            background: #1e3a5f;
+            box-shadow: 0 0 15px rgba(96, 165, 250, 0.3);
+        }
+
+        .step-dot.done {
+            border-color: #4ade80;
+            color: #4ade80;
+            background: #0f2a1a;
+        }
+
+        /* ==== NARRATION ==== */
+        .narration-box {
+            background: #1a1e2e;
+            border: 1px solid #2d3348;
+            border-radius: 14px;
+            padding: 18px 24px;
+            margin-bottom: 18px;
+            min-height: 70px;
+            transition: border-color 0.4s ease;
+        }
+
+        .narration-step {
+            font-weight: 700;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+        }
+
+        .narration-text {
+            font-size: 15px;
+            line-height: 1.6;
+            color: #cbd5e1;
+        }
+
+        .narration-code {
+            font-family: 'JetBrains Mono', monospace;
+            background: #0f1117;
+            border: 1px solid #2d3348;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #a78bfa;
+            overflow-x: auto;
+        }
+
+        /* ==== CONTROLS ==== */
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 10px;
+        }
+
+        .btn {
+            padding: 10px 28px;
+            border-radius: 10px;
+            border: 1px solid #334155;
+            background: #1e293b;
+            color: #e2e8f0;
+            font-family: 'Inter', sans-serif;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            background: #2d3a4f;
+            border-color: #60a5fa;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #059669, #10b981);
+            border-color: #10b981;
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #10b981, #34d399);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .auto-play {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #94a3b8;
+        }
+
+        .auto-play input {
+            accent-color: #10b981;
+        }
+
+        /* ==== LEGEND ==== */
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: #94a3b8;
+        }
+
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        /* ==== COMPARISON BANNER ==== */
+        .comparison {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .comp-item {
+            background: #1a1e2e;
+            border: 1px solid #2d3348;
+            border-radius: 10px;
+            padding: 10px 18px;
+            text-align: center;
+            min-width: 150px;
+        }
+
+        .comp-label {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+
+        .comp-old {
+            color: #ef4444;
+            font-weight: 700;
+            font-size: 14px;
+            text-decoration: line-through;
+            opacity: 0.6;
+        }
+
+        .comp-new {
+            color: #4ade80;
+            font-weight: 700;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Improved Architecture — After the Assignment</h1>
+        <p class="subtitle">
+            <span class="badge">UPGRADED</span>
+            &nbsp; Two workers + LPOP concurrency + Pub/Sub keyspace notifications
+        </p>
+
+        <!-- Comparison banner -->
+        <div class="comparison">
+            <div class="comp-item">
+                <div class="comp-label">Workers</div>
+                <div><span class="comp-old">1</span> &nbsp;→&nbsp; <span class="comp-new">2+</span></div>
+            </div>
+            <div class="comp-item">
+                <div class="comp-label">Queue Claim</div>
+                <div><span class="comp-old">LRANGE</span> &nbsp;→&nbsp; <span class="comp-new">LPOP</span></div>
+            </div>
+            <div class="comp-item">
+                <div class="comp-label">Result Delivery</div>
+                <div><span class="comp-old">Polling</span> &nbsp;→&nbsp; <span class="comp-new">Pub/Sub</span></div>
+            </div>
+        </div>
+
+        <!-- Step dots -->
+        <div class="steps" id="stepDots"></div>
+
+        <!-- Diagram -->
+        <div class="diagram" id="diagram">
+            <svg class="arrows" width="100%" height="100%">
+                <defs>
+                    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+                        <path d="M0,0 L10,5 L0,10 Z" fill="#60a5fa" />
+                    </marker>
+                    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+                        <path d="M0,0 L10,5 L0,10 Z" fill="#a78bfa" />
+                    </marker>
+                    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+                        <path d="M0,0 L10,5 L0,10 Z" fill="#4ade80" />
+                    </marker>
+                    <marker id="arrowYellow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+                        <path d="M0,0 L10,5 L0,10 Z" fill="#facc15" />
+                    </marker>
+                    <marker id="arrowPink" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+                        <path d="M0,0 L10,5 L0,10 Z" fill="#f472b6" />
+                    </marker>
+                    <marker id="arrowRed" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+                        <path d="M0,0 L10,5 L0,10 Z" fill="#ef4444" />
+                    </marker>
+                </defs>
+
+                <!-- 1: Client → Web Server -->
+                <path class="arrow-path a1" id="arrow1" d="M 160,170 C 200,140 220,80 250,70"
+                    marker-end="url(#arrowBlue)" />
+
+                <!-- 2: Web Server → Redis (RPUSH + SUBSCRIBE) -->
+                <path class="arrow-path a2" id="arrow2" d="M 410,85 C 430,95 450,105 480,120"
+                    marker-end="url(#arrowPurple)" />
+
+                <!-- 3a: Redis → Worker 1 (LPOP succeeds) -->
+                <path class="arrow-path a3" id="arrow3a" d="M 640,140 C 670,110 700,80 730,70"
+                    marker-end="url(#arrowGreen)" />
+
+                <!-- 3b: Redis → Worker 2 (LPOP returns nil) -->
+                <path class="arrow-path a3b" id="arrow3b" d="M 640,200 C 670,210 700,215 730,220"
+                    marker-end="url(#arrowRed)" />
+
+                <!-- 4: Worker 1 → Redis (SET result) -->
+                <path class="arrow-path a4" id="arrow4" d="M 730,130 C 700,160 670,180 640,200"
+                    marker-end="url(#arrowGreen)" />
+
+                <!-- 5: Redis → Web Server (notification) -->
+                <path class="arrow-path a5" id="arrow5" d="M 480,200 C 440,200 400,180 380,150"
+                    marker-end="url(#arrowPink)" />
+
+                <!-- 6: Return path: Web Server → Client -->
+                <path class="arrow-path a6" id="arrow6" d="M 250,120 C 200,150 160,180 100,240"
+                    marker-end="url(#arrowPink)" />
+            </svg>
+
+            <!-- Nodes -->
+            <div class="node node-user" id="nodeUser">
+                <div class="node-icon">👤</div>
+                <div class="node-label">Client</div>
+                <div class="node-sub">simple_request.py</div>
+            </div>
+
+            <div class="node node-web" id="nodeWeb">
+                <div class="node-icon">🌐</div>
+                <div class="node-label">Web Server</div>
+                <div class="node-sub">run_web_server.py</div>
+            </div>
+
+            <div class="node node-redis" id="nodeRedis">
+                <div class="node-icon">🔴</div>
+                <div class="node-label">Redis</div>
+                <div class="node-sub">Message Broker</div>
+            </div>
+
+            <div class="node node-w1" id="nodeW1">
+                <div class="node-icon">🧠</div>
+                <div class="node-label">Worker 1</div>
+                <div class="node-sub">run_model_server.py</div>
+            </div>
+
+            <div class="node node-w2" id="nodeW2">
+                <div class="node-icon">🧠</div>
+                <div class="node-label">Worker 2</div>
+                <div class="node-sub">run_model_server.py</div>
+            </div>
+
+            <!-- Nil badge -->
+            <div class="nil-badge" id="nilBadge">LPOP → nil</div>
+
+            <!-- Notification badge -->
+            <div class="notif-badge" id="notifBadge">📡 SET event received!</div>
+            <div class="saved-badge" id="savedBadge">
+                <div class="star">⭐</div>
+                <div>Saved <span class="count">~4-8</span> polls</div>
+                <div style="font-size:9px;color:#94a3b8">CLIENT_SLEEP = 0.25s</div>
+            </div>
+
+            <!-- Floating packets -->
+            <div class="packet" id="packetImg">
+                <img class="packet-image" src="../work_queue_example/castle_image.jpg" alt="castle"
+                    onerror="this.style.display='none'" />
+            </div>
+            <div class="packet" id="packetUuid">
+                <div class="packet-uuid">a3f8-...-d7b2</div>
+            </div>
+            <div class="packet" id="packetJson">
+                <div class="packet-json">{"castle": 0.87}</div>
+            </div>
+            <div class="packet" id="packetNotif">
+                <div class="packet-notif">📡 SET a3f8...</div>
+            </div>
+        </div>
+
+        <!-- Redis internals -->
+        <div class="redis-contents" id="redisContents">
+            <div class="redis-title">📦 Redis Database State</div>
+            <div class="redis-entry" id="rQueue">
+                <span class="redis-key">image_queue</span>
+                <span class="redis-type">LIST</span>
+                <div class="redis-value">(empty)</div>
+            </div>
+            <div class="redis-entry" id="rSub">
+                <span class="redis-key">__keyevent@0__:set</span>
+                <span class="redis-type">SUBSCRIPTION</span>
+                <div class="redis-value">web server listening for SET events</div>
+            </div>
+            <div class="redis-entry" id="rResult">
+                <span class="redis-key">a3f8b1c9-...-d7b2</span>
+                <span class="redis-type">STRING</span>
+                <div class="redis-value">[{"label":"castle","probability":0.8742}, ...]</div>
+            </div>
+        </div>
+
+        <!-- Narration -->
+        <div class="narration-box" id="narration">
+            <div class="narration-step" id="narrationStep" style="color: #4ade80;">Ready</div>
+            <div class="narration-text" id="narrationText">Click <strong>Next Step</strong> to trace a request through
+                the <em>improved</em> architecture with concurrent workers and Pub/Sub notifications.</div>
+        </div>
+
+        <!-- Controls -->
+        <div class="controls">
+            <button class="btn" id="btnPrev" disabled>← Previous</button>
+            <button class="btn btn-primary" id="btnNext">Next Step →</button>
+            <button class="btn" id="btnReset">Reset</button>
+            <label class="auto-play">
+                <input type="checkbox" id="autoPlay"> Auto-play (3s)
+            </label>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#60a5fa"></div> Client
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#a78bfa"></div> Web Server
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#f87171"></div> Redis
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#4ade80"></div> Worker 1 (wins)
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#facc15"></div> Worker 2 (nil)
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#f472b6"></div> Notification / Response
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const STEPS = [
+            {
+                title: "Step 1 — Client Sends Image",
+                color: "#60a5fa",
+                text: `Same as before: the client sends <strong>castle_image.jpg</strong> to the Flask web server via HTTP POST.`,
+                code: `image = open("castle_image.jpg", "rb").read()\nr = requests.post("http://127.0.0.1:5000/predict", files={"image": image})`,
+                activeNodes: ["nodeUser", "nodeWeb"],
+                activeArrows: ["arrow1"],
+                packet: { id: "packetImg", from: "nodeUser", to: "nodeWeb" },
+                redis: { queue: false, sub: false, result: false, queueText: "(empty)" },
+                badges: {}
+            },
+            {
+                title: "Step 2 — Web Server Queues + Subscribes",
+                color: "#a78bfa",
+                text: `The web server generates a <strong>UUID</strong>, pushes the job to <code>image_queue</code> via <code>RPUSH</code>, and <strong>subscribes</strong> to Redis keyspace notifications for the UUID key. Instead of polling, it will be <em>notified</em> when the result is ready.`,
+                code: `k = str(uuid.uuid4())\ndb.rpush("image_queue", json.dumps({"id": k, "image": base64}))\n\n# Subscribe to keyspace notification for this key\npubsub = db.pubsub()\npubsub.subscribe(f"__keyevent@0__:set")`,
+                activeNodes: ["nodeWeb", "nodeRedis"],
+                activeArrows: ["arrow2"],
+                packet: { id: "packetUuid", from: "nodeWeb", to: "nodeRedis" },
+                redis: { queue: true, sub: true, result: false, queueText: `[{"id":"a3f8b1c9-...-d7b2", "image":"<base64>"}]` },
+                badges: {}
+            },
+            {
+                title: "Step 3 — Both Workers Race to LPOP",
+                color: "#4ade80",
+                text: `Both workers call <code>LPOP</code> simultaneously. Because <code>LPOP</code> is <strong>atomic</strong>, only <strong>Worker 1</strong> gets the job. <strong>Worker 2</strong> receives <code>nil</code> — no duplicate processing! This is the concurrency fix over the original <code>LRANGE</code>/<code>LTRIM</code> approach.`,
+                code: `# Worker 1:                    # Worker 2:\njob = db.lpop("image_queue")   job = db.lpop("image_queue")\n# → gets the job!              # → nil (already taken)`,
+                activeNodes: ["nodeRedis", "nodeW1", "nodeW2"],
+                activeArrows: ["arrow3a", "arrow3b"],
+                packet: { id: "packetImg", from: "nodeRedis", to: "nodeW1" },
+                redis: { queue: false, sub: true, result: false, queueText: "(empty — atomically popped)" },
+                badges: { nil: true }
+            },
+            {
+                title: "Step 4 — Worker 1 Classifies & Stores Result",
+                color: "#4ade80",
+                text: `Worker 1 runs the image through <strong>ResNet50</strong>, then stores the JSON result in Redis via <code>SET</code> using the UUID key. This <code>SET</code> operation triggers a <strong>keyspace notification</strong> automatically.`,
+                code: `preds = model.predict(batch)\nresults = imagenet_utils.decode_predictions(preds)\ndb.set("a3f8b1c9-...-d7b2", json.dumps(output))\n# Redis internally fires: PUBLISH __keyevent@0__:set a3f8b1c9-...-d7b2`,
+                activeNodes: ["nodeW1", "nodeRedis"],
+                activeArrows: ["arrow4"],
+                packet: { id: "packetJson", from: "nodeW1", to: "nodeRedis" },
+                redis: { queue: false, sub: true, result: true, queueText: "(empty)" },
+                badges: {}
+            },
+            {
+                title: "Step 5 — Notification Fires Instantly",
+                color: "#f472b6",
+                text: `Redis automatically publishes a <strong>keyspace notification</strong> because <code>notify-keyspace-events</code> is configured. The web server's <code>pubsub</code> subscription receives the event <em>instantly</em> — <strong>no polling delay</strong>! It immediately calls <code>GET</code> to retrieve the result.`,
+                code: `# Web server receives notification instantly:\nmessage = pubsub.get_message()  # {"type":"message", "data":"a3f8b1c9-...-d7b2"}\nif message and message["data"] == k:\n    output = db.get(k)\n    data["predictions"] = json.loads(output)\n    db.delete(k)`,
+                activeNodes: ["nodeRedis", "nodeWeb"],
+                activeArrows: ["arrow5"],
+                packet: { id: "packetNotif", from: "nodeRedis", to: "nodeWeb" },
+                redis: { queue: false, sub: true, result: true, resultHighlight: true, queueText: "(empty)" },
+                badges: { notif: true }
+            },
+            {
+                title: "Step 6 — Response Returned to Client",
+                color: "#f472b6",
+                text: `The web server returns the JSON prediction results to the client. The entire round-trip is <strong>faster</strong> because there was no polling delay. The castle image was classified with 87.42% confidence! 🏰`,
+                code: `# Client receives:\n{\n  "success": true,\n  "predictions": [\n    {"label": "castle", "probability": 0.8742},\n    {"label": "church", "probability": 0.0543},\n    {"label": "palace", "probability": 0.0298}\n  ]\n}`,
+                activeNodes: ["nodeWeb", "nodeUser"],
+                activeArrows: ["arrow6"],
+                packet: { id: "packetJson", from: "nodeWeb", to: "nodeUser" },
+                redis: { queue: false, sub: false, result: false, queueText: "(empty)" },
+                badges: {}
+            }
+        ];
+
+        let currentStep = -1;
+        let autoPlayTimer = null;
+
+        // Build step dots
+        const dotsContainer = document.getElementById("stepDots");
+        STEPS.forEach((_, i) => {
+            const dot = document.createElement("div");
+            dot.className = "step-dot";
+            dot.textContent = i + 1;
+            dot.addEventListener("click", () => goToStep(i));
+            dotsContainer.appendChild(dot);
+        });
+
+        function clearAll() {
+            document.querySelectorAll(".node").forEach(n => { n.classList.remove("active", "rejected"); });
+            document.querySelectorAll(".arrow-path").forEach(a => a.classList.remove("active"));
+            document.querySelectorAll(".packet").forEach(p => { p.style.opacity = "0"; });
+            document.getElementById("rQueue").classList.remove("visible");
+            document.getElementById("rSub").classList.remove("visible");
+            document.getElementById("rResult").classList.remove("visible", "highlight");
+            document.getElementById("nilBadge").classList.remove("visible");
+            document.getElementById("notifBadge").classList.remove("visible");
+            document.getElementById("savedBadge").classList.remove("visible");
+        }
+
+        function animatePacket(packetId, fromId, toId) {
+            const packet = document.getElementById(packetId);
+            const from = document.getElementById(fromId);
+            const to = document.getElementById(toId);
+            if (!packet || !from || !to) return;
+
+            const diagram = document.getElementById("diagram");
+            const dRect = diagram.getBoundingClientRect();
+            const fRect = from.getBoundingClientRect();
+            const tRect = to.getBoundingClientRect();
+
+            const startX = fRect.left + fRect.width / 2 - dRect.left - 25;
+            const startY = fRect.top + fRect.height / 2 - dRect.top - 25;
+            const endX = tRect.left + tRect.width / 2 - dRect.left - 25;
+            const endY = tRect.top + tRect.height / 2 - dRect.top - 25;
+
+            packet.style.transition = "none";
+            packet.style.left = startX + "px";
+            packet.style.top = startY + "px";
+            packet.style.opacity = "1";
+
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    packet.style.transition = "left 1s ease-in-out, top 1s ease-in-out";
+                    packet.style.left = endX + "px";
+                    packet.style.top = endY + "px";
+                });
+            });
+        }
+
+        function goToStep(idx) {
+            if (idx < 0 || idx >= STEPS.length) return;
+            currentStep = idx;
+            const step = STEPS[idx];
+
+            clearAll();
+
+            // Activate nodes
+            step.activeNodes.forEach(id => document.getElementById(id).classList.add("active"));
+
+            // Worker 2 rejection effect on step 3
+            if (idx === 2) {
+                setTimeout(() => {
+                    document.getElementById("nodeW2").classList.remove("active");
+                    document.getElementById("nodeW2").classList.add("rejected");
+                }, 800);
+            }
+
+            // Activate arrows
+            step.activeArrows.forEach(id => document.getElementById(id).classList.add("active"));
+
+            // Animate packet
+            if (step.packet) {
+                setTimeout(() => animatePacket(step.packet.id, step.packet.from, step.packet.to), 200);
+            }
+
+            // Redis state
+            const rQueue = document.getElementById("rQueue");
+            const rSub = document.getElementById("rSub");
+            const rResult = document.getElementById("rResult");
+            if (step.redis.queue) {
+                rQueue.classList.add("visible");
+                rQueue.querySelector(".redis-value").textContent = step.redis.queueText || "";
+            }
+            if (step.redis.sub) {
+                rSub.classList.add("visible");
+            }
+            if (step.redis.result) {
+                rResult.classList.add("visible");
+                if (step.redis.resultHighlight) rResult.classList.add("highlight");
+            }
+
+            // Badges
+            if (step.badges.nil) {
+                setTimeout(() => document.getElementById("nilBadge").classList.add("visible"), 900);
+            }
+            if (step.badges.notif) {
+                setTimeout(() => document.getElementById("notifBadge").classList.add("visible"), 800);
+                setTimeout(() => document.getElementById("savedBadge").classList.add("visible"), 1200);
+            }
+
+            // Narration
+            document.getElementById("narrationStep").style.color = step.color;
+            document.getElementById("narrationStep").textContent = step.title;
+            document.getElementById("narrationText").innerHTML = step.text +
+                (step.code ? `<div class="narration-code"><pre>${step.code}</pre></div>` : "");
+
+            // Update dots
+            document.querySelectorAll(".step-dot").forEach((dot, i) => {
+                dot.className = "step-dot";
+                if (i < idx) dot.classList.add("done");
+                if (i === idx) dot.classList.add("active");
+            });
+
+            // Button states
+            document.getElementById("btnPrev").disabled = (idx <= 0);
+            document.getElementById("btnNext").disabled = (idx >= STEPS.length - 1);
+        }
+
+        document.getElementById("btnNext").addEventListener("click", () => {
+            if (currentStep < STEPS.length - 1) goToStep(currentStep + 1);
+        });
+
+        document.getElementById("btnPrev").addEventListener("click", () => {
+            if (currentStep > 0) goToStep(currentStep - 1);
+        });
+
+        document.getElementById("btnReset").addEventListener("click", () => {
+            currentStep = -1;
+            clearAll();
+            document.querySelectorAll(".step-dot").forEach(d => d.className = "step-dot");
+            document.getElementById("narrationStep").style.color = "#4ade80";
+            document.getElementById("narrationStep").textContent = "Ready";
+            document.getElementById("narrationText").innerHTML = 'Click <strong>Next Step</strong> to trace a request through the <em>improved</em> architecture with concurrent workers and Pub/Sub notifications.';
+            document.getElementById("btnPrev").disabled = true;
+            document.getElementById("btnNext").disabled = false;
+        });
+
+        // Auto-play
+        document.getElementById("autoPlay").addEventListener("change", function () {
+            if (this.checked) {
+                if (currentStep < 0) goToStep(0);
+                autoPlayTimer = setInterval(() => {
+                    if (currentStep < STEPS.length - 1) {
+                        goToStep(currentStep + 1);
+                    } else {
+                        clearInterval(autoPlayTimer);
+                        document.getElementById("autoPlay").checked = false;
+                    }
+                }, 3000);
+            } else {
+                clearInterval(autoPlayTimer);
+            }
+        });
+
+        // Keyboard controls
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "ArrowRight" || e.key === " ") {
+                e.preventDefault();
+                if (currentStep < STEPS.length - 1) goToStep(currentStep + 1);
+            } else if (e.key === "ArrowLeft") {
+                if (currentStep > 0) goToStep(currentStep - 1);
+            }
+        });
+    </script>
+</body>
+
+</html>
