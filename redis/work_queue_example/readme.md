@@ -93,7 +93,7 @@ python simple_request.py 
 
 <details>
 <summary>How to Enable Redis Notifications</summary>
-To use Redis notifications it is not that difficult. Though you do need to open the redis CLI (you can access from the cloud redis insight tool) and enable notifications:  
+To use Redis notifications it is not that difficult. Though you do need to open the redis CLI (you can access from the cloud redis insight tool https://app.redislabs.com/ -> Redis Insight Web -> Workbench -> CLI (bottom left)) and enable notifications:  
 	
 ```
 CONFIG SET notify-keyspace-events KEA
