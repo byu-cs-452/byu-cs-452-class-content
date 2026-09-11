@@ -19,7 +19,7 @@ Below are some instructions and you can check the examples folder to get some id
 
 * **OpenAI Setup**: Create a new OpenAI Account or pay the $5. This should be enough to complete the assignment. (Cost me 29 cents in including all my debugging)
 
-* **Developer Setup**: Setup a developer API KEY, find your "ORGID". Learn how to interface with OpenAI. Learn about different models and their costs (GPT 3.5, davinci, GPT 4, etc). Search Google to find more information.
+* **Developer Setup**: Setup a developer API KEY. Learn how to interface with OpenAI. Learn about different models and their costs (GPT 3.5, davinci, GPT 4, etc). Search Google to find more information.
 
 ---
 
@@ -67,7 +67,7 @@ Below are some instructions and you can check the examples folder to get some id
 
 * **What you will post on our class channel (as a group of 1-5 people):**
 
-  * Working code files (and DB if using SQLite). Remember, never share your Open AI API key or OrgID. Preferably in the form of a github link!
+  * Working code files (and DB if using SQLite). Remember, never share your Open AI API key. Preferably in the form of a github link!
 
   * One+ sentence description or purpose of your database
 
