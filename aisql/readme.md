@@ -25,7 +25,7 @@ Below are some instructions and you can check the examples folder to get some id
 
 # Design and Build
 
-* **Design a database!** If you have a hard time coming up with an idea of what to model, maybe try one of these (restaurant, university, hair salon, system for tracking pianos on campus, vending machines, etc..). You can reuse your "Your Choice" design as well. You'll also need to put data into your database. (You can reuse the one from the build your own database assignment)
+* **Design a database!** If you have a hard time coming up with an idea of what to model, maybe try one of these (restaurant, university, hair salon, system for tracking pianos on campus, vending machines, etc..). You'll also need to put data into your database. 
 
 * **Build an app** that users can use plain words to ask questions and get answers in plain words using data from your database!
 
