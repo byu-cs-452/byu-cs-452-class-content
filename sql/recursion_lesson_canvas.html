@@ -1,0 +1,144 @@
+<h2>Recursion in SQL &mdash; Monday 9/21</h2>
+<p>Today we learn how to query <strong>hierarchies</strong> (org charts, folders, comment threads, bill of materials) with <code>WITH RECURSIVE</code>. On Wednesday we move to window functions, and the SQL midterm follows.</p>
+
+<div style="background:#fff4cc;border-left:4px solid #e0a800;padding:10px 14px;margin:12px 0;">
+  <strong>Due this week</strong>
+  <ul style="margin:6px 0 0 0;">
+    <li>[TODO: assignment name]: due [TODO: day/time]</li>
+    <li>[TODO: assignment name]: due [TODO: day/time]</li>
+    <li><strong>Midterm SQL</strong>: [TODO: date/window]. It covers everything through recursion and window functions.</li>
+  </ul>
+</div>
+
+<h3>Today's plan</h3>
+<ol>
+  <li><strong>Warm-up:</strong> Why can't a normal <code>JOIN</code> answer "everyone who reports up to Blake"?</li>
+  <li><strong>The data:</strong> We'll use a small <code>employees</code> table, and I'll draw it as a graph live in Figma.</li>
+  <li><strong>Anatomy of a recursive CTE:</strong> anchor, <code>UNION ALL</code>, recursive step, stopping condition.</li>
+  <li><strong>Walk it together:</strong> walking down the tree, walking up the tree, and building a path string.</li>
+  <li><strong>Try it yourself:</strong> a few short exercises in OneCompiler.</li>
+  <li><strong>LeetCode challenge:</strong> three medium problems (plus a stretch problem).</li>
+</ol>
+
+<h3>1. The data</h3>
+<p>Open the table here (you can fork it and run queries in your browser): <a href="https://onecompiler.com/mysql/453wx95wm" target="_blank" rel="noopener">https://onecompiler.com/mysql/453wx95wm</a></p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">CREATE TABLE employees (
+    id         INT PRIMARY KEY,
+    first_name VARCHAR(50),
+    last_name  VARCHAR(50),
+    manager_id INT NULL   -- NULL = top of the tree
+);
+
+INSERT INTO employees (id, first_name, last_name, manager_id) VALUES
+    (1, 'Avery',   'Stone',    NULL),  -- CEO
+    (2, 'Blake',   'Rivera',   1),
+    (3, 'Casey',   'Nguyen',   1),
+    (4, 'Devon',   'Okafor',   2),
+    (5, 'Emerson', 'Lindqvist',2),
+    (6, 'Finley',  'Marsh',    3),
+    (7, 'Gray',    'Ito',      6);</pre>
+<p>Drawn as a tree (we'll build this in Figma in class):</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">Avery (1)
+├── Blake (2)
+│   ├── Devon (4)
+│   └── Emerson (5)
+└── Casey (3)
+    └── Finley (6)
+        └── Gray (7)</pre>
+<p><strong>Key idea:</strong> Each row points to its parent through <code>manager_id</code>. That is a <em>self-referencing</em> table. One self-join gets you one level down. A recursive CTE follows the pointers as many levels as needed.</p>
+
+<h3>2. Anatomy of a recursive CTE</h3>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">WITH RECURSIVE cte_name AS (
+    -- 1. ANCHOR: the starting row(s). Runs once.
+    SELECT ...
+    UNION ALL
+    -- 2. RECURSIVE STEP: joins back to cte_name.
+    --    Runs over and over on the rows from the previous pass
+    --    and stops when a pass returns no new rows.
+    SELECT ... FROM some_table JOIN cte_name ON ...
+)
+SELECT * FROM cte_name;</pre>
+<p>Simplest possible example, counting 1 to 10:</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">WITH RECURSIVE nums AS (
+    SELECT 1 AS n
+    UNION ALL
+    SELECT n + 1 FROM nums WHERE n &lt; 10   -- the WHERE is the stopping condition
+)
+SELECT n FROM nums;</pre>
+
+<h3>3. Walking the tree</h3>
+<p><strong>A. Walk down:</strong> the whole org chart, with depth and path.</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">WITH RECURSIVE org AS (
+    SELECT id, first_name, manager_id,
+           0 AS depth,
+           CAST(first_name AS CHAR(200)) AS path
+    FROM employees
+    WHERE manager_id IS NULL                 -- anchor: the CEO
+    UNION ALL
+    SELECT e.id, e.first_name, e.manager_id,
+           o.depth + 1,
+           CONCAT(o.path, ' &gt; ', e.first_name)
+    FROM employees e
+    JOIN org o ON e.manager_id = o.id        -- children of the last level
+)
+SELECT * FROM org ORDER BY path;</pre>
+<p><em>MySQL gotcha:</em> The anchor row sets the column types. Without the <code>CAST(... AS CHAR(200))</code>, <code>path</code> is only as wide as "Avery", and longer paths fail with a "Data too long" error.</p>
+
+<p><strong>B. Walk up:</strong> Gray's chain of command.</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">WITH RECURSIVE chain AS (
+    SELECT id, first_name, manager_id, 0 AS steps
+    FROM employees
+    WHERE id = 7                             -- anchor: Gray
+    UNION ALL
+    SELECT m.id, m.first_name, m.manager_id, c.steps + 1
+    FROM employees m
+    JOIN chain c ON m.id = c.manager_id      -- move to my manager
+)
+SELECT * FROM chain;</pre>
+<p>Compare A and B. Walking up or down only changes which side of the join condition you are on.</p>
+
+<p><strong>Safety note:</strong> If the data has a cycle (A manages B, and B manages A), the recursion never stops. MySQL stops it at <code>cte_max_recursion_depth</code> (default 1000). You can also add your own guard, such as <code>WHERE depth &lt; 20</code>.</p>
+
+<h3>4. Try it yourself</h3>
+<ol>
+  <li>List everyone who reports up to <strong>Blake</strong>, directly or indirectly. Leave out Blake.</li>
+  <li>Who is the deepest employee in the company, and how deep are they?</li>
+  <li>For each employee, count how many people report up to them in total. (Hint: walk up from every employee at once, then <code>GROUP BY</code>.)</li>
+  <li>Use a recursive CTE to generate every date in September 2026.</li>
+</ol>
+
+<h3>5. LeetCode challenge (all free mediums)</h3>
+<ol>
+  <li><a href="https://leetcode.com/problems/managers-with-at-least-5-direct-reports/" target="_blank" rel="noopener">570. Managers with at Least 5 Direct Reports</a>: the same <code>managerId</code> self-reference as today's table. A good warm-up.</li>
+  <li><a href="https://leetcode.com/problems/last-person-to-fit-in-the-bus/" target="_blank" rel="noopener">1204. Last Person to Fit in the Bus</a>: a running total. Try solving it <strong>twice</strong>: once with a recursive CTE that walks the queue one <code>turn</code> at a time, and once with the tools you already know. On Wednesday we'll solve it a third way with a window function.</li>
+  <li><a href="https://leetcode.com/problems/consecutive-numbers/" target="_blank" rel="noopener">180. Consecutive Numbers</a>: compare each row with its neighbors. Think about how you would do this with self-joins.</li>
+  <li><em>Stretch:</em> <a href="https://leetcode.com/problems/restaurant-growth/" target="_blank" rel="noopener">1321. Restaurant Growth</a>: a 7-day moving average. It's hard today and much easier after Wednesday.</li>
+</ol>
+
+<h3>What's coming</h3>
+<p><em>Tentative, subject to change.</em></p>
+<table style="border-collapse:collapse;width:100%;" border="1" cellpadding="6">
+  <thead>
+    <tr style="background:#e8e8e8;">
+      <th style="text-align:left;">Week</th>
+      <th style="text-align:left;">Theme</th>
+      <th style="text-align:left;">Class 1</th>
+      <th style="text-align:left;">Class 2</th>
+      <th style="text-align:left;">Exam</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="background:#fff4cc;"><td><strong>Week 4 (this week)</strong></td><td>SQL</td><td><strong>Recursion (today)</strong></td><td>Window Functions</td><td>Midterm SQL</td></tr>
+    <tr><td>Week 5</td><td></td><td>Design #1</td><td>Design #2</td><td></td></tr>
+    <tr><td>Week 6</td><td></td><td>Design #3?</td><td>SQL AI / RAG</td><td>Midterm Design</td></tr>
+    <tr><td>Week 7</td><td></td><td>AI Assisted Work</td><td>Embeddings / podcast recommender</td><td></td></tr>
+    <tr><td>Week 8</td><td></td><td>Supabase Auth</td><td>Graphs</td><td></td></tr>
+    <tr><td>Week 9</td><td></td><td>Redis, Concurrency, Notifications</td><td>Scaling &ndash; Cassandra (velocity)</td><td></td></tr>
+    <tr><td>Week 10</td><td></td><td>Mongo</td><td>Spark (volume) / MapReduce?</td><td></td></tr>
+    <tr><td>Week 11</td><td></td><td>Data Pipeline</td><td>Reflection</td><td></td></tr>
+    <tr><td>Week 12</td><td>Reflection / Final Project</td><td>Project Pitches</td><td>Final</td><td></td></tr>
+    <tr><td>Week 13 (half)</td><td>Final Project</td><td>Final</td><td>Final</td><td></td></tr>
+    <tr><td>Week 14</td><td>Final Project</td><td>Final</td><td>Final</td><td></td></tr>
+    <tr><td>Week 15</td><td>Final Project</td><td>Final</td><td>Final</td><td></td></tr>
+  </tbody>
+</table>
