@@ -1,0 +1,176 @@
+<h2>Window Functions &mdash; Wednesday 9/23</h2>
+<p>Monday we used recursion to walk a hierarchy. Today we learn the other tool that saves you from writing three nested subqueries: <strong>window functions</strong>. A window function looks at a set of rows related to the current row, and still returns one row of output per input row.</p>
+
+<div style="background:#fff4cc;border-left:4px solid #e0a800;padding:10px 14px;margin:12px 0;">
+  <strong>Due this week</strong>
+  <ul style="margin:6px 0 0 0;">
+    <li><strong>Thu 9/24, 11:59pm:</strong> <a href="https://byu.instructure.com/courses/35462/assignments/1472733">LeetCode! Choose 10 more! SQL Medium or Hard</a></li>
+    <li><strong>Thu 9/24, 11:59pm:</strong> <a href="https://byu.instructure.com/courses/35462/assignments/1472726">In Person SQL Interview Medium (with hints, TA or instructor)</a></li>
+  </ul>
+  <strong>Coming up next week</strong>
+  <ul style="margin:6px 0 0 0;">
+    <li><strong>Tue 9/29:</strong> <a href="https://byu.instructure.com/courses/35462/assignments/1472705">Assignment 05 (Database Design #1)</a>, <a href="https://byu.instructure.com/courses/35462/assignments/1472716">ERD Tires, Stores, Employees, Customers</a></li>
+    <li><strong>Thu 10/1:</strong> <a href="https://byu.instructure.com/courses/35462/assignments/1472739">Midterm SQL (Without AI, Open Book)</a>, <a href="https://byu.instructure.com/courses/35462/assignments/1472738">Midterm SQL (With AI)</a>, <a href="https://byu.instructure.com/courses/35462/assignments/1472725">In Person SQL Interview Medium (no hints)</a>, <a href="https://byu.instructure.com/courses/35462/assignments/1472706">Assignment 06</a></li>
+  </ul>
+</div>
+
+<h3>Today's plan</h3>
+<ol>
+  <li><strong>Warm-up:</strong> One query that needs a rank per group, written the painful way.</li>
+  <li><strong>The syntax:</strong> <code>OVER (PARTITION BY ... ORDER BY ... frame)</code>.</li>
+  <li><strong>The full list</strong> of MySQL window functions, and what each one is for.</li>
+  <li><strong>Two worked examples</strong> on a small <code>sales</code> table.</li>
+  <li><strong>Gotchas</strong> that cost people points on the midterm.</li>
+  <li><strong>Practice:</strong> four problems, one of them a LeetCode hard.</li>
+</ol>
+
+<h3>1. The idea</h3>
+<p><code>GROUP BY</code> collapses rows. A window function does <em>not</em>. It keeps every row and adds a column computed from a "window" of nearby rows.</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">SELECT region, SUM(amount)               FROM sales GROUP BY region;  -- 2 rows out
+SELECT region, SUM(amount) OVER (PARTITION BY region) FROM sales;      -- 12 rows out</pre>
+<p>Reach for a window function whenever a question contains: <em>rank</em>, <em>top N per group</em>, <em>running total</em>, <em>compared to the previous row</em>, <em>moving average</em>, or <em>percent of total</em>.</p>
+
+<h3>2. The syntax</h3>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">function_name(args) OVER (
+    PARTITION BY expr   -- optional: start over for each group (like GROUP BY, but no collapsing)
+    ORDER BY expr       -- optional: order rows inside the partition
+    frame_clause        -- optional: which rows around the current one count
+)</pre>
+<p>The frame clause is <code>ROWS</code> or <code>RANGE</code> plus bounds, for example:</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW   -- everything up to here (running total)
+ROWS BETWEEN 6 PRECEDING AND CURRENT ROW           -- a 7-row moving window
+ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING           -- neighbors on both sides</pre>
+<p>If you use the same window more than once, name it instead of repeating it:</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">SELECT rep, amount,
+       RANK()      OVER w AS rnk,
+       SUM(amount) OVER w AS running_total
+FROM sales
+WINDOW w AS (PARTITION BY region ORDER BY sale_date);</pre>
+
+<h3>3. Every MySQL window function</h3>
+<p><strong>Ranking and distribution</strong></p>
+<table style="border-collapse:collapse;width:100%;" border="1" cellpadding="6">
+  <tr style="background:#e8e8e8;"><th style="text-align:left;">Function</th><th style="text-align:left;">What it gives you</th></tr>
+  <tr><td><code>ROW_NUMBER()</code></td><td>1, 2, 3, ... with no ties. Ties are broken arbitrarily unless you order by something unique.</td></tr>
+  <tr><td><code>RANK()</code></td><td>Ties share a rank, and the next rank skips: 1, 1, 3.</td></tr>
+  <tr><td><code>DENSE_RANK()</code></td><td>Ties share a rank, with no gap: 1, 1, 2. This is the one for "top 3 salaries".</td></tr>
+  <tr><td><code>PERCENT_RANK()</code></td><td>Relative rank from 0 to 1, computed as (rank - 1) / (rows - 1).</td></tr>
+  <tr><td><code>CUME_DIST()</code></td><td>Fraction of partition rows at or below this row's value.</td></tr>
+  <tr><td><code>NTILE(n)</code></td><td>Splits the partition into n buckets and returns this row's bucket. Quartiles are <code>NTILE(4)</code>.</td></tr>
+</table>
+<p><strong>Looking at other rows</strong></p>
+<table style="border-collapse:collapse;width:100%;" border="1" cellpadding="6">
+  <tr style="background:#e8e8e8;"><th style="text-align:left;">Function</th><th style="text-align:left;">What it gives you</th></tr>
+  <tr><td><code>LAG(expr, n, default)</code></td><td>The value n rows back (default n = 1). Use it for day-over-day change.</td></tr>
+  <tr><td><code>LEAD(expr, n, default)</code></td><td>The value n rows forward. Use it for "what happened next".</td></tr>
+  <tr><td><code>FIRST_VALUE(expr)</code></td><td>First value in the frame.</td></tr>
+  <tr><td><code>LAST_VALUE(expr)</code></td><td>Last value in the frame. <em>Watch the frame</em>: see the gotchas below.</td></tr>
+  <tr><td><code>NTH_VALUE(expr, n)</code></td><td>The nth value in the frame, or NULL if the frame is shorter than n.</td></tr>
+</table>
+<p><strong>Aggregates used as window functions.</strong> Add <code>OVER (...)</code> to the aggregates you already know: <code>SUM</code>, <code>AVG</code>, <code>COUNT</code>, <code>MIN</code>, <code>MAX</code>, the statistical ones (<code>STDDEV_POP</code>, <code>STDDEV_SAMP</code>, <code>VAR_POP</code>, <code>VAR_SAMP</code>), the bit functions (<code>BIT_AND</code>, <code>BIT_OR</code>, <code>BIT_XOR</code>), and the JSON aggregates (<code>JSON_ARRAYAGG</code>, <code>JSON_OBJECTAGG</code>). Note that <code>GROUP_CONCAT</code> is <em>not</em> allowed as a window function.</p>
+<p>A few restrictions worth knowing: in <code>LAG</code>, <code>LEAD</code>, <code>NTH_VALUE</code>, and <code>NTILE</code>, the count must be a literal number, not a column or an expression. <code>IGNORE NULLS</code> parses but is not supported.</p>
+
+<h3>4. Two worked examples</h3>
+<p>Paste this into <a href="https://onecompiler.com/mysql" target="_blank" rel="noopener">OneCompiler (MySQL)</a> and follow along:</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">CREATE TABLE sales (
+    id        INT PRIMARY KEY,
+    rep       VARCHAR(50),
+    region    VARCHAR(20),
+    sale_date DATE,
+    amount    DECIMAL(8,2)
+);
+
+INSERT INTO sales (id, rep, region, sale_date, amount) VALUES
+    ( 1, 'Avery',   'West', '2026-09-01',  900.00),
+    ( 2, 'Blake',   'West', '2026-09-01', 1200.00),
+    ( 3, 'Casey',   'East', '2026-09-01',  750.00),
+    ( 4, 'Avery',   'West', '2026-09-02', 1100.00),
+    ( 5, 'Devon',   'East', '2026-09-02', 1500.00),
+    ( 6, 'Blake',   'West', '2026-09-03',  400.00),
+    ( 7, 'Casey',   'East', '2026-09-03', 1500.00),
+    ( 8, 'Emerson', 'West', '2026-09-03',  950.00),
+    ( 9, 'Devon',   'East', '2026-09-04',  600.00),
+    (10, 'Avery',   'West', '2026-09-04', 1300.00),
+    (11, 'Finley',  'East', '2026-09-04',  600.00),
+    (12, 'Blake',   'West', '2026-09-05', 2100.00);</pre>
+
+<p><strong>Example 1 &mdash; three ways to number rows.</strong> The East region has two sales of 1500 and two of 600, so the differences show up clearly.</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">SELECT region, rep, amount,
+       RANK()       OVER (PARTITION BY region ORDER BY amount DESC) AS rnk,
+       DENSE_RANK() OVER (PARTITION BY region ORDER BY amount DESC) AS dense_rnk,
+       ROW_NUMBER() OVER (PARTITION BY region ORDER BY amount DESC) AS row_num
+FROM sales
+ORDER BY region, amount DESC;</pre>
+<p>The East rows come back like this. Watch what each column does with the ties:</p>
+<table style="border-collapse:collapse;" border="1" cellpadding="6">
+  <tr style="background:#e8e8e8;"><th>region</th><th>rep</th><th>amount</th><th>rnk</th><th>dense_rnk</th><th>row_num</th></tr>
+  <tr><td>East</td><td>Devon</td><td>1500</td><td>1</td><td>1</td><td>1</td></tr>
+  <tr><td>East</td><td>Casey</td><td>1500</td><td>1</td><td>1</td><td>2</td></tr>
+  <tr><td>East</td><td>Casey</td><td>750</td><td>3</td><td>2</td><td>3</td></tr>
+  <tr><td>East</td><td>Devon</td><td>600</td><td>4</td><td>3</td><td>4</td></tr>
+  <tr><td>East</td><td>Finley</td><td>600</td><td>4</td><td>3</td><td>5</td></tr>
+</table>
+
+<p><strong>Example 2 &mdash; running total and day-over-day change.</strong></p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">SELECT sale_date, region, amount,
+       SUM(amount) OVER (PARTITION BY region ORDER BY sale_date, id) AS running_total,
+       LAG(amount) OVER (PARTITION BY region ORDER BY sale_date, id) AS prev_amount,
+       amount - LAG(amount) OVER (PARTITION BY region ORDER BY sale_date, id) AS change
+FROM sales
+ORDER BY region, sale_date, id;</pre>
+<p>The first row of each region has a NULL <code>prev_amount</code>, because there is nothing before it. Use <code>LAG(amount, 1, 0)</code> if you want a zero instead.</p>
+
+<h3>5. Gotchas</h3>
+<ul>
+  <li><strong>You cannot use a window function in <code>WHERE</code> or <code>HAVING</code>.</strong> Window functions run after those clauses. Compute the value in a subquery or CTE, then filter outside it. This is the pattern behind nearly every "top N per group" problem:
+    <pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">WITH ranked AS (
+    SELECT rep, region, amount,
+           DENSE_RANK() OVER (PARTITION BY region ORDER BY amount DESC) AS rnk
+    FROM sales
+)
+SELECT * FROM ranked WHERE rnk &lt;= 3;</pre>
+  </li>
+  <li><strong>The default frame is not what you expect.</strong> With an <code>ORDER BY</code> and no frame clause, the frame is <code>RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW</code>, and <code>RANGE</code> treats tied rows as one unit. Two sales on the same date jump the running total together. Order by a tiebreaker (as above, <code>sale_date, id</code>) or say <code>ROWS</code> explicitly.</li>
+  <li><strong><code>LAST_VALUE</code> looks broken by default</strong>, because the frame ends at the current row, so the "last value" is the current row. You usually want <code>ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING</code>.</li>
+  <li><strong>No <code>ORDER BY</code> in the <code>OVER</code> clause</strong> means every row in the partition is a peer. That is right for a partition total, and wrong for a running total.</li>
+  <li><strong><code>ROW_NUMBER</code> with an unstable sort</strong> gives different answers on different runs. Order by something unique when it matters.</li>
+</ul>
+
+<h3>6. Practice</h3>
+<p>These four are all free on LeetCode. Start with the first.</p>
+<ol>
+  <li><a href="https://leetcode.com/problems/last-person-to-fit-in-the-bus/" target="_blank" rel="noopener">1204. Last Person to Fit in the Bus</a> (medium): you solved this Monday with a recursive CTE. Now do it with one <code>SUM() OVER (ORDER BY turn)</code>. Compare the two solutions, and notice how much shorter this one is.</li>
+  <li><a href="https://leetcode.com/problems/consecutive-numbers/" target="_blank" rel="noopener">180. Consecutive Numbers</a> (medium): <code>LAG</code> and <code>LEAD</code> turn this into one comparison.</li>
+  <li><a href="https://leetcode.com/problems/restaurant-growth/" target="_blank" rel="noopener">1321. Restaurant Growth</a> (medium): a 7-day moving average, which is a frame clause with <code>6 PRECEDING</code>. Careful: sum by day first, before you take the moving average.</li>
+  <li><a href="https://leetcode.com/problems/department-top-three-salaries/" target="_blank" rel="noopener">185. Department Top Three Salaries</a> (<strong>hard</strong>): the classic. Read the problem statement closely on what "top three" means when salaries tie, and pick your ranking function to match. This is the gotcha above, in exam form.</li>
+</ol>
+<p><em>Stretch, if you finish early:</em> <a href="https://leetcode.com/problems/human-traffic-of-stadium/" target="_blank" rel="noopener">601. Human Traffic of Stadium</a> (hard). Finding three or more consecutive ids is a nice use of <code>LAG</code> and <code>LEAD</code>, or of the difference between an id and a row number.</p>
+
+<h3>What's coming</h3>
+<p><em>Tentative, subject to change.</em></p>
+<table style="border-collapse:collapse;width:100%;" border="1" cellpadding="6">
+  <thead>
+    <tr style="background:#e8e8e8;">
+      <th style="text-align:left;">Week</th>
+      <th style="text-align:left;">Theme</th>
+      <th style="text-align:left;">Class 1</th>
+      <th style="text-align:left;">Class 2</th>
+      <th style="text-align:left;">Exam</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr style="background:#fff4cc;"><td><strong>Week 4 (this week)</strong></td><td>SQL</td><td>Recursion</td><td><strong>Window Functions (today)</strong></td><td>Midterm SQL</td></tr>
+    <tr><td>Week 5</td><td></td><td>Design #1</td><td>Design #2</td><td></td></tr>
+    <tr><td>Week 6</td><td></td><td>Design #3?</td><td>SQL AI / RAG</td><td>Midterm Design</td></tr>
+    <tr><td>Week 7</td><td></td><td>AI Assisted Work</td><td>Embeddings / podcast recommender</td><td></td></tr>
+    <tr><td>Week 8</td><td></td><td>Supabase Auth</td><td>Graphs</td><td></td></tr>
+    <tr><td>Week 9</td><td></td><td>Redis, Concurrency, Notifications</td><td>Scaling &ndash; Cassandra (velocity)</td><td></td></tr>
+    <tr><td>Week 10</td><td></td><td>Mongo</td><td>Spark (volume) / MapReduce?</td><td></td></tr>
+    <tr><td>Week 11</td><td></td><td>Data Pipeline</td><td>Reflection</td><td></td></tr>
+    <tr><td>Week 12</td><td>Reflection / Final Project</td><td>Project Pitches</td><td>Final</td><td></td></tr>
+    <tr><td>Week 13 (half)</td><td>Final Project</td><td>Final</td><td>Final</td><td></td></tr>
+    <tr><td>Week 14</td><td>Final Project</td><td>Final</td><td>Final</td><td></td></tr>
+    <tr><td>Week 15</td><td>Final Project</td><td>Final</td><td>Final</td><td></td></tr>
+  </tbody>
+</table>
+<p>Monday's page: <a href="https://byu.instructure.com/courses/35462/pages/in-class-9-slash-21-recursion">[In Class 9/21] Recursion</a></p>
