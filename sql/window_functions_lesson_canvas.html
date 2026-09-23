@@ -71,7 +71,7 @@ WINDOW w AS (PARTITION BY region ORDER BY sale_date);</pre>
 <p>A few restrictions worth knowing: in <code>LAG</code>, <code>LEAD</code>, <code>NTH_VALUE</code>, and <code>NTILE</code>, the count must be a literal number, not a column or an expression. <code>IGNORE NULLS</code> parses but is not supported.</p>
 
 <h3>4. Two worked examples</h3>
-<p>Paste this into <a href="https://onecompiler.com/mysql" target="_blank" rel="noopener">OneCompiler (MySQL)</a> and follow along:</p>
+<p>The table is already set up here, so you can fork it and run queries in your browser: <a href="https://onecompiler.com/mysql/4544z6qyv" target="_blank" rel="noopener">https://onecompiler.com/mysql/4544z6qyv</a></p>
 <pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">CREATE TABLE sales (
     id        INT PRIMARY KEY,
     rep       VARCHAR(50),
