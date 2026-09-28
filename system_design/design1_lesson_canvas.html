@@ -1,0 +1,183 @@
+<h2>Database Design #1 &mdash; Monday 9/28</h2>
+<p>Today we stop writing queries and start deciding what the tables should be. The reading covers the principles; class is for applying them. We'll use the Discount Tire ERD that's due tomorrow as the working example, so bring what you have so far, even if it's a mess.</p>
+
+<div style="background:#fff4cc;border-left:4px solid #e0a800;padding:10px 14px;margin:12px 0;">
+  <strong>Due tomorrow (Tue 9/29, 11:59pm)</strong>
+  <ul style="margin:6px 0 0 0;">
+    <li><a href="https://byu.instructure.com/courses/35462/assignments/1472716">ERD Tires, Stores, Employees, Customers</a> &mdash; submit a PDF of your diagram</li>
+    <li><a href="https://byu.instructure.com/courses/35462/assignments/1472705">Assignment 05 (Database Design #1)</a></li>
+  </ul>
+  <strong>Coming up</strong>
+  <ul style="margin:6px 0 0 0;">
+    <li><strong>Thu 10/1:</strong> <a href="https://byu.instructure.com/courses/35462/assignments/1472739">Midterm SQL (Without AI, Open Book)</a>, <a href="https://byu.instructure.com/courses/35462/assignments/1472738">Midterm SQL (With AI)</a>, <a href="https://byu.instructure.com/courses/35462/assignments/1472725">In Person SQL Interview Medium (no hints)</a>, <a href="https://byu.instructure.com/courses/35462/assignments/1472706">Assignment 06 (Database Design #2)</a>, <a href="https://byu.instructure.com/courses/35462/assignments/1472714">ERD (Group) &mdash; Software Service Data Model [In Class]</a></li>
+  </ul>
+</div>
+
+<h3>Today's plan</h3>
+<ol>
+  <li><strong>One-to-many:</strong> where the foreign key goes, and why it never goes anywhere else.</li>
+  <li><strong>Many-to-many:</strong> the junction table, and the moment it grows up into a real entity.</li>
+  <li><strong>Supertype and subtype:</strong> three ways to build it, and how to choose.</li>
+  <li><strong>Design to the questions:</strong> we take questions from the homework and trace them through your model.</li>
+  <li><strong>Peer review:</strong> trade diagrams and run the checklist.</li>
+</ol>
+<p>A note on today's examples: I'm using generic ones for the patterns on purpose. The tire shop shows up as <em>questions</em> for you to answer, not as a finished answer key, since that diagram is your homework.</p>
+
+<h3>1. One-to-many</h3>
+<p>One row on the "one" side relates to many rows on the "many" side. This is the relationship you'll use most.</p>
+<p><strong>The rule:</strong> the foreign key lives on the <em>many</em> side. Always. One author has many books, so <code>book</code> carries <code>author_id</code>.</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">CREATE TABLE author (
+    author_id INT PRIMARY KEY,
+    name      VARCHAR(100)
+);
+
+CREATE TABLE book (
+    book_id   INT PRIMARY KEY,
+    title     VARCHAR(200),
+    author_id INT NOT NULL,          -- FK on the MANY side
+    FOREIGN KEY (author_id) REFERENCES author(author_id)
+);</pre>
+<p>If you ever find yourself putting a list into a column (<code>book_ids VARCHAR(500)</code> holding <code>"3,17,42"</code>), that is a one-to-many asking to be a foreign key. It's also a 1NF violation.</p>
+<p><strong>Ask yourself two questions, one per direction.</strong> "Can one author have many books?" and "Can one book have many authors?" You need both answers before you can draw the line. Getting the second one wrong is what turns a one-to-many into a missed many-to-many.</p>
+<p><strong>Then ask whether it's optional.</strong> Must every book have an author? Can an author exist with no books? That's participation, and it decides whether the foreign key is <code>NOT NULL</code>.</p>
+<p><em>In the homework:</em> cars have multiple tires, and a tire belongs to exactly one car. Which table gets the foreign key? And can a tire exist in your model before it's installed on anything?</p>
+
+<h3>2. Many-to-many</h3>
+<p>Many rows on each side. A relational database cannot store this in two tables, so you add a third: a <strong>junction</strong> (or bridge) table holding a foreign key to each side.</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">CREATE TABLE student (student_id INT PRIMARY KEY, name VARCHAR(100));
+CREATE TABLE course  (course_id  INT PRIMARY KEY, title VARCHAR(100));
+
+CREATE TABLE enrollment (
+    student_id INT,
+    course_id  INT,
+    PRIMARY KEY (student_id, course_id),      -- composite key: no duplicate pairs
+    FOREIGN KEY (student_id) REFERENCES student(student_id),
+    FOREIGN KEY (course_id)  REFERENCES course(course_id)
+);</pre>
+<p>Notice that a many-to-many is really two one-to-manys pointing at the junction table.</p>
+<p><strong>The part people miss: the junction table usually wants attributes of its own.</strong> Enrollment isn't just a pairing, it has a grade, a term, and a date. The moment the relationship carries facts, it has become an entity in its own right (your book may call it an <em>associative entity</em>), and it deserves a real name.</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">CREATE TABLE enrollment (
+    student_id INT,
+    course_id  INT,
+    term       VARCHAR(20),
+    grade      CHAR(2),
+    PRIMARY KEY (student_id, course_id, term)  -- now they can retake it
+);</pre>
+<p>That primary key change is a design decision with teeth. Ask what makes a row unique, and you'll usually find a hidden requirement.</p>
+<p><em>In the homework:</em> mechanics work at more than one garage, and cars can have multiple owners. Both are many-to-many. What would you want to record <em>about</em> each pairing? For ownership, does it matter when it started and ended, or that someone used to own the car?</p>
+
+<h3>3. Supertype and subtype</h3>
+<p>Use this when several kinds of thing share most of their attributes but differ in a few. The shared attributes go on the supertype, and the distinct ones go on each subtype.</p>
+<p>Two questions define the shape:</p>
+<ul>
+  <li><strong>Disjoint or overlapping?</strong> Can one row be two subtypes at once? Disjoint means no, overlapping means yes.</li>
+  <li><strong>Total or partial?</strong> Must every supertype row be <em>some</em> subtype, or can it be only the general thing?</li>
+</ul>
+<p><strong>Three ways to implement it.</strong> Each is defensible, and you should be able to say why you picked yours:</p>
+<table style="border-collapse:collapse;width:100%;" border="1" cellpadding="6">
+  <tr style="background:#e8e8e8;"><th style="text-align:left;">Approach</th><th style="text-align:left;">How</th><th style="text-align:left;">Good</th><th style="text-align:left;">Bad</th></tr>
+  <tr>
+    <td><strong>One table for everything</strong><br>(single table inheritance)</td>
+    <td>All attributes in one table plus a <code>type</code> column. Unused columns are NULL.</td>
+    <td>No joins. Simple queries.</td>
+    <td>Lots of NULLs. The database can't enforce "mechanics must have a salary".</td>
+  </tr>
+  <tr>
+    <td><strong>A table per subtype</strong><br>(table per concrete class)</td>
+    <td>No supertype table. <code>customer</code> and <code>mechanic</code> each repeat the shared columns.</td>
+    <td>No NULLs, no joins.</td>
+    <td>Shared columns are duplicated, and nothing can reference "a person" generically. Breaks badly if one row must be both.</td>
+  </tr>
+  <tr style="background:#eef7ee;">
+    <td><strong>Supertype plus subtype tables</strong><br>(class table inheritance)</td>
+    <td><code>person</code> holds the shared columns. <code>customer</code> and <code>mechanic</code> each have a PK that is also a FK to <code>person</code>.</td>
+    <td>No duplication, no NULLs, other tables can point at <code>person</code>, and one person can be both.</td>
+    <td>Joins to assemble a whole record.</td>
+  </tr>
+</table>
+<p>The third pattern is what the homework asks for when it says customers and mechanics "should be sub-entities of a larger person table":</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">CREATE TABLE person (
+    person_id  INT PRIMARY KEY,
+    first_name VARCHAR(50),
+    last_name  VARCHAR(50)
+);
+
+CREATE TABLE mechanic (
+    person_id INT PRIMARY KEY,                -- PK and FK at the same time: 1-to-1 with person
+    salary    DECIMAL(10,2) NOT NULL,
+    FOREIGN KEY (person_id) REFERENCES person(person_id)
+);</pre>
+<p>Making the subtype's primary key <em>also</em> a foreign key is the trick that enforces one subtype row per person.</p>
+<p><em>In the homework, read this sentence very carefully:</em> "Discount Tire has customers and mechanics (who may bring in their cars for repairs)," and then this question from the list: "How many mechanics get their tires from Discount Tire?" What do those two together tell you about whether your subtypes are disjoint? Which of the three approaches above survives that requirement, and which quietly breaks? Also: we track birthdays for customers but not mechanics, and salary for mechanics but not customers. Where does each attribute go?</p>
+
+<h3>4. The trap that costs the most points</h3>
+<p>There are two different kinds of fact in this domain, and they need different structures:</p>
+<ul>
+  <li><strong>State:</strong> what is true right now. Which tires are on the car, the current tread depth, the last rotated date.</li>
+  <li><strong>Event:</strong> what happened, with a date attached. This tire was purchased here on this date, this car was rotated on these six occasions, this person owned this car during this period.</li>
+</ul>
+<p>A model that stores only current state cannot answer a question about history. Look at the question list with that in mind:</p>
+<ul>
+  <li>"What is the total number of tires a customer has bought?" &mdash; can you still answer this after the tire is replaced and thrown away?</li>
+  <li>"How many cars has a customer brought in?" &mdash; owning a car and bringing it to a garage are different facts. Does your model have both?</li>
+  <li>"How many tires are installed on the customer's birthday?" &mdash; which table holds the install event, and does it know who was being served?</li>
+  <li>"Which garages can handle five customers at the same time?" &mdash; this one is answerable from a plain attribute. Which one, and do you have it?</li>
+</ul>
+<p>You don't have to model every event in the world. You <em>do</em> have to make a deliberate choice, and be able to say which questions your model answers and which it doesn't.</p>
+
+<h3>5. A few smaller decisions</h3>
+<ul>
+  <li><strong>Addresses in their own table</strong> (the homework requires it). So: do two people at the same house share one address row, or get one each? Your answer changes whether person-to-address is many-to-one or many-to-many. Both are defensible; think about what happens when Smarty corrects a shared row.</li>
+  <li><strong>Derived and dependent data.</strong> City and state are determined by zip code. Storing all three is a 3NF conversation. Storing a tire's age instead of its install date is the same mistake in a smaller package: store the fact, derive the rest.</li>
+  <li><strong>Natural versus surrogate keys.</strong> A tire has a unique barcode. Is that your primary key, or do you add a <code>tire_id</code> anyway? Argue both sides. What happens when a barcode is misprinted or reused?</li>
+  <li><strong>Multi-valued attributes.</strong> One person, several phone numbers. <code>phone1</code>, <code>phone2</code>, <code>phone3</code> is the wrong answer, and knowing why is most of 1NF.</li>
+  <li><strong>Name your relationship lines with verbs.</strong> "Mechanic <em>works at</em> garage" reads back as a sentence you can check against the requirements. Unlabeled lines hide wrong assumptions.</li>
+</ul>
+
+<h3>6. In-class activity</h3>
+<p>Work on your own diagram in <a href="https://drawsql.app/" target="_blank" rel="noopener">drawsql.app</a> or whatever tool you like.</p>
+<ol>
+  <li><strong>Inventory your relationships.</strong> List every line in your diagram and label it 1:1, 1:M, or M:N. For each, say the sentence out loud in both directions.</li>
+  <li><strong>Pick three questions</strong> from the homework's question list. For each, write the join path through your tables: <code>customer &rarr; owns &rarr; car &rarr; tire</code>. If you get stuck, that's a missing table, not a missing query.</li>
+  <li><strong>Trade with a partner</strong> and run the checklist below on their diagram. Finding someone else's missing junction table is much easier than finding your own.</li>
+</ol>
+
+<h3>Checklist before you submit</h3>
+<ul>
+  <li>Every entity has a primary key, and every relationship is carried by a foreign key.</li>
+  <li>No many-to-many line is drawn directly between two entities. Each one has a junction table.</li>
+  <li>Every junction table has been asked whether it needs attributes of its own.</li>
+  <li>Person, customer, and mechanic are structured so that a person can be both, if you decided that they can.</li>
+  <li>No repeating groups (<code>phone1</code>, <code>phone2</code>), and no comma-separated lists in a column.</li>
+  <li>Each attribute sits on the entity it actually describes, and is not duplicated on another.</li>
+  <li>You can trace a join path for every question in the homework's list, or you can say why you chose not to support one.</li>
+  <li>Exported as a <strong>PDF</strong>, which is what the submission requires.</li>
+</ul>
+
+<h3>What's coming</h3>
+<p><em>Tentative, subject to change.</em></p>
+<table style="border-collapse:collapse;width:100%;" border="1" cellpadding="6">
+  <thead>
+    <tr style="background:#e8e8e8;">
+      <th style="text-align:left;">Week</th>
+      <th style="text-align:left;">Theme</th>
+      <th style="text-align:left;">Class 1</th>
+      <th style="text-align:left;">Class 2</th>
+      <th style="text-align:left;">Exam</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>Week 4</td><td>SQL</td><td><a href="https://byu.instructure.com/courses/35462/pages/in-class-9-slash-21-recursion">Recursion</a></td><td><a href="https://byu.instructure.com/courses/35462/pages/in-class-9-slash-23-window-functions">Window Functions</a></td><td>Midterm SQL</td></tr>
+    <tr style="background:#fff4cc;"><td><strong>Week 5 (this week)</strong></td><td></td><td><strong>Design #1 (today)</strong></td><td>Design #2</td><td></td></tr>
+    <tr><td>Week 6</td><td></td><td>Design #3?</td><td>SQL AI / RAG</td><td>Midterm Design</td></tr>
+    <tr><td>Week 7</td><td></td><td>AI Assisted Work</td><td>Embeddings / podcast recommender</td><td></td></tr>
+    <tr><td>Week 8</td><td></td><td>Supabase Auth</td><td>Graphs</td><td></td></tr>
+    <tr><td>Week 9</td><td></td><td>Redis, Concurrency, Notifications</td><td>Scaling &ndash; Cassandra (velocity)</td><td></td></tr>
+    <tr><td>Week 10</td><td></td><td>Mongo</td><td>Spark (volume) / MapReduce?</td><td></td></tr>
+    <tr><td>Week 11</td><td></td><td>Data Pipeline</td><td>Reflection</td><td></td></tr>
+    <tr><td>Week 12</td><td>Reflection / Final Project</td><td>Project Pitches</td><td>Final</td><td></td></tr>
+    <tr><td>Week 13 (half)</td><td>Final Project</td><td>Final</td><td>Final</td><td></td></tr>
+    <tr><td>Week 14</td><td>Final Project</td><td>Final</td><td>Final</td><td></td></tr>
+    <tr><td>Week 15</td><td>Final Project</td><td>Final</td><td>Final</td><td></td></tr>
+  </tbody>
+</table>
