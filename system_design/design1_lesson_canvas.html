@@ -43,7 +43,8 @@ CREATE TABLE book (
 <p><em>In the homework:</em> cars have multiple tires, and a tire belongs to exactly one car. Which table gets the foreign key? And can a tire exist in your model before it's installed on anything?</p>
 
 <h3>2. Many-to-many</h3>
-<p>Many rows on each side. A relational database cannot store this in two tables, so you add a third: a <strong>junction</strong> (or bridge) table holding a foreign key to each side.</p>
+<p>Many rows on each side. A relational database cannot store this in two tables, so you add a third table holding a foreign key to each side.</p>
+<p><strong>It goes by many names.</strong> The structure is always the same, but every book, framework, and interviewer seems to reach for a different word: <em>junction</em> table, <em>bridge</em> table, <em>join</em> table, <em>link</em> or <em>linking</em> table, <em>cross-reference</em> (<em>xref</em>) table, <em>intersection</em> table, <em>mapping</em> table, <em>association</em> table, <em>associative entity</em>, <em>composite entity</em>, <em>pivot</em> table (Laravel), and <em>through</em> model (Django, Rails). If an interviewer uses a word you haven't heard, they most likely mean this.</p>
 <pre style="background:#f5f5f5;padding:12px;border-radius:4px;overflow-x:auto;">CREATE TABLE student (student_id INT PRIMARY KEY, name VARCHAR(100));
 CREATE TABLE course  (course_id  INT PRIMARY KEY, title VARCHAR(100));
 
