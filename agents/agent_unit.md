@@ -76,6 +76,9 @@ Professor Reynolds will write a log for each project too, and share it with the 
 **Missed class?** Drop your log at Professor Reynolds' office, **TMCB 2260**, the same day (under the door
 or on the desk).
 
+**Grace days** follow the project submission in Canvas, as usual. The log isn't tracked for grace days; the
+expectation is that it comes along at about the same time as the project.
+
 ## This is an experiment
 
 Some things will go wrong, and we'll adjust together. Feedback on what's working and what isn't is very
