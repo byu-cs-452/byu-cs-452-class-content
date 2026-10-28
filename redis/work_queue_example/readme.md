@@ -69,8 +69,9 @@ python simple_request.py 
 ## Deliverables (Include code, diagrams, and brief explanations in your PDF)
 
 ### 1. Redis Key Structure
-- Identify the "key" in the REDIS database where the web server stores the user's image.  
+- Identify where in the REDIS database the web server stores the user's image: which key, and where within that key's value.  
 - State the data type and describe the structure of the stored value.  
+- Which key holds the result the worker sends back?  
 
 ### 2. Web Server to Model Server Communication
 - Explain how the web server communicates with the model (worker) server to hand off work and receive back results.  
@@ -78,16 +79,18 @@ python simple_request.py 
 
 ### 3. Model Output
 - Run `simple_request.py` with [castle_image.jpg](castle_image.jpg) (which is the default).  
-- Report the results and the detected objects with their confidence scores.  
+- Report the results: ResNet50 classifies the whole image, so list its top-5 labels with their probabilities.  
 
 ### 4. Concurrency and Scaling
 - Running multiple worker (model) servers simultaneously causes a bug. Identify it, fix it, and explain your solution with code and diagrams.  
+  - If some requests never return while two workers are running, that's the bug showing itself, not a broken setup. Restart the web server between runs.  
 - Are multiple web servers safe to run? Why or why not? Will they ever generate conflicting UUIDs? Will subscribing to notifications scale or conflict between multiple web server instances? (Research and explain your answer.)  
 - What happens if a worker crashes after claiming an item from the queue but before writing the result? That work is lost. Describe — you don't need to implement — a strategy to handle this.  
 
 ### 5. Reducing Polling Overhead
 - Polling is reliable but it is the most expensive way to interact with a system.  
 - Instead of having the web server poll REDIS waiting for a key to show up, research and implement a way that instead uses Redis notifications.
+- Run `CONFIG SET notify-keyspace-events KEA` on your database first (see below). Without it, Redis sends no notifications.
 - Test your implementation and explain how it reduces overhead using code, words, and diagrams.  
 - What happens if the notification is missed or the worker crashes before writing the result? Describe a strategy you could use to ensure no work is lost.  
 
