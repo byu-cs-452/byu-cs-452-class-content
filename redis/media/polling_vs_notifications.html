@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<!-- Published as a Claude artifact: https://claude.ai/artifact/RiinqWPR91BFsVxJqQnNcc -->
+<title>Polling vs. Notifications</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one long scroll of four "stages"; each stage = wide diagram on top, caption + step list below. */
+:root {
+  --bg: #f2f3f6; --surface: #ffffff; --ink: #161a22; --muted: #5a6373; --line: #d3d8e1;
+  --redis: #c8312a; --redis-bg: #fbeceb;
+  --data: #1f63c4; --data-bg: #e7effb;
+  --notify: #0d7a50; --notify-bg: #e1f4eb;
+  --bad: #b42318; --bad-bg: #fdeceb;
+  --s-orig: #eb6834; --s-new: #2a78d6;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+    --redis: #f0605a; --redis-bg: #2c1716;
+    --data: #74a9ff; --data-bg: #17253b;
+    --notify: #43d199; --notify-bg: #112a20;
+    --bad: #ff7f74; --bad-bg: #331816;
+    --s-orig: #d95926; --s-new: #3987e5;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+  --redis: #f0605a; --redis-bg: #2c1716;
+  --data: #74a9ff; --data-bg: #17253b;
+  --notify: #43d199; --notify-bg: #112a20;
+  --bad: #ff7f74; --bad-bg: #331816;
+  --s-orig: #d95926; --s-new: #3987e5;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 17px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 28px 64px; }
+h1, h2 { font-family: var(--f-display); text-wrap: balance; letter-spacing: -0.01em; margin: 0; }
+h1 { font-size: clamp(30px, 4.4vw, 48px); font-weight: 800; line-height: 1.05; }
+h1 .r { color: var(--redis); }
+h2 { font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; }
+p { margin: 0; max-width: 72ch; }
+code, pre { font-family: var(--f-mono); font-size: 0.86em; }
+.credit { color: var(--muted); font-size: 13px; font-style: italic; }
+header.top { display: grid; gap: 12px; margin-bottom: 18px; }
+nav.jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+nav.jump a { font-size: 14px; text-decoration: none; color: var(--ink); border: 1px solid var(--line); background: var(--surface); padding: 5px 12px; border-radius: 999px; }
+nav.jump a:hover, nav.jump a:focus-visible { border-color: var(--redis); outline: none; }
+section.stage { margin-top: 44px; display: grid; gap: 14px; scroll-margin-top: 12px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--redis); }
+.diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 680px; height: auto; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.controls button, .controls select { font: inherit; font-size: 15px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.controls button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 700; }
+.controls button:disabled { opacity: 0.45; cursor: default; }
+.controls button:focus-visible, .controls select:focus-visible { outline: 2px solid var(--redis); outline-offset: 2px; }
+.counters { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+.counter { font-family: var(--f-mono); font-size: 13px; padding: 4px 10px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+.counter b { font-size: 15px; }
+.counter.bad b { color: var(--bad); }
+.counter.good b { color: var(--notify); }
+.below { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 820px) { .below { grid-template-columns: minmax(0, 1fr); } }
+.caption { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: grid; gap: 8px; min-width: 0; }
+.caption .stepno { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.caption h3 { margin: 0; font-family: var(--f-display); font-size: 21px; font-weight: 600; }
+.caption pre { margin: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; white-space: pre; line-height: 1.45; }
+.caption pre:empty { display: none; }
+ol.steps { margin: 0; padding: 0 0 0 26px; display: grid; gap: 3px; font-size: 15px; color: var(--muted); }
+ol.steps li { padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+ol.steps li.done { color: var(--ink); }
+ol.steps li.now { color: var(--ink); background: var(--redis-bg); font-weight: 700; }
+.note { font-size: 15px; color: var(--muted); }
+
+/* SVG */
+.node rect.box { fill: var(--surface); stroke: var(--line); stroke-width: 2; }
+.node.redis rect.box { fill: var(--redis-bg); stroke: var(--redis); }
+.node.active rect.box { stroke: var(--ink); }
+.node text.t { font-family: var(--f-display); font-weight: 600; font-size: 17px; fill: var(--ink); }
+.node text.s { font-family: var(--f-mono); font-size: 11px; fill: var(--muted); }
+.node text.st { font-family: var(--f-mono); font-size: 12px; fill: var(--data); }
+.node.redis text.t { fill: var(--redis); }
+text.lbl { font-family: var(--f-mono); font-size: 11px; fill: var(--muted); }
+rect.lane { fill: var(--surface); stroke: var(--line); stroke-dasharray: 4 3; }
+g.chip rect { fill: var(--data-bg); stroke: var(--data); stroke-width: 1.5; }
+g.chip text { font-family: var(--f-mono); font-size: 12px; font-weight: 600; fill: var(--data); }
+g.chip.read rect { stroke-width: 3; stroke-dasharray: 3 2; }
+g.chip.gone rect { fill: var(--bad-bg); stroke: var(--bad); }
+g.chip.gone text { fill: var(--bad); }
+g.key rect { fill: var(--surface); stroke: var(--line); }
+g.key text { font-family: var(--f-mono); font-size: 11.5px; fill: var(--ink); }
+g.key text.v { fill: var(--muted); }
+g.key.set rect { fill: var(--data-bg); stroke: var(--data); }
+g.key.set text.v { fill: var(--data); }
+g.key.orphan rect { fill: var(--bad-bg); stroke: var(--bad); }
+g.key.orphan text.v { fill: var(--bad); }
+g.pk rect { stroke-width: 1.5; }
+g.pk text { font-family: var(--f-mono); font-size: 12px; dominant-baseline: central; text-anchor: middle; }
+g.pk.cmd rect { fill: var(--surface); stroke: var(--ink); } g.pk.cmd text { fill: var(--ink); }
+g.pk.nil rect { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 3 2; } g.pk.nil text { fill: var(--muted); }
+g.pk.data rect { fill: var(--data-bg); stroke: var(--data); } g.pk.data text { fill: var(--data); font-weight: 600; }
+g.pk.notify rect { fill: var(--notify-bg); stroke: var(--notify); stroke-width: 2.5; } g.pk.notify text { fill: var(--notify); font-weight: 600; }
+g.pk.bad rect { fill: var(--bad-bg); stroke: var(--bad); stroke-dasharray: 4 2; } g.pk.bad text { fill: var(--bad); font-weight: 600; }
+line.wire { stroke: var(--line); stroke-width: 1.5; }
+line.sub { stroke: var(--notify); stroke-width: 2.5; stroke-dasharray: 7 5; }
+text.sublbl { font-family: var(--f-mono); font-size: 11px; fill: var(--notify); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) { line.sub { animation: flow 1s linear infinite; } }
+@keyframes flow { to { stroke-dashoffset: -12; } }
+
+/* Scale section */
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 820px) { .charts { grid-template-columns: minmax(0, 1fr); } }
+.chart { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 14px 8px; position: relative; min-width: 0; }
+.chart h3 { margin: 0 0 2px; font-family: var(--f-display); font-weight: 600; font-size: 18px; }
+.chart .sub { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+.chart svg { width: 100%; height: auto; display: block; }
+.chart text { font-family: var(--f-body); fill: var(--muted); font-size: 12px; }
+.chart text.val { fill: var(--ink); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart line.grid { stroke: var(--line); stroke-width: 1; }
+.chart rect.orig { fill: var(--s-orig); } .chart rect.new { fill: var(--s-new); }
+.chart rect.hit { fill: transparent; }
+.legend { display: flex; gap: 16px; font-size: 14px; flex-wrap: wrap; }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 13px; padding: 6px 9px; border-radius: 6px; white-space: nowrap; }
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--f-display); font-weight: 600; }
+td:first-child { font-family: var(--f-mono); white-space: nowrap; font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+.tag { font-family: var(--f-mono); font-size: 12px; padding: 1px 6px; border-radius: 4px; }
+.tag.ok { background: var(--notify-bg); color: var(--notify); }
+.tag.no { background: var(--bad-bg); color: var(--bad); }
+</style>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">CS 452 · Redis Work Queue Project</div>
+  <h1>Polling vs. <span class="r">Notifications</span></h1>
+  <p>Step through what happens inside the Redis project: the web front door turns an image into a JSON blob, a worker classifies it, and the answer comes back through a Redis key. Then see why the original design can't add workers, why polling wastes effort, and what changes when Redis notifies instead.</p>
+  <p class="credit">[Page created using Claude by Professor Reynolds]</p>
+  <nav class="jump" aria-label="Sections">
+    <a href="#today">1 · How it works today</a>
+    <a href="#workers">2a · A second worker</a>
+    <a href="#polling">2b · The cost of polling</a>
+    <a href="#fix">3 · Notifications + atomic pop</a>
+    <a href="#scale">4 · Scaling to 1,000,000s</a>
+  </nav>
+</header>
+
+<section class="stage" id="today" data-scene="today">
+  <div class="eyebrow">Animation 1</div>
+  <h2>How the project works today</h2>
+  <p>One request, one worker. Every arrow is a real Redis command from <code>run_web_server.py</code> or <code>run_model_server.py</code>. Both programs <em>poll</em>: they ask, sleep 0.25 s, and ask again.</p>
+</section>
+
+<section class="stage" id="workers" data-scene="workers">
+  <div class="eyebrow">Animation 2a · Problem 1</div>
+  <h2>Why a second worker breaks things</h2>
+  <p><code>LRANGE</code> only <em>reads</em> the list, and <code>LTRIM</code> removes items later by position. Between those two commands another worker can read the same items, and new items can slide into the positions being trimmed.</p>
+</section>
+
+<section class="stage" id="polling" data-scene="polling">
+  <div class="eyebrow">Animation 2b · Problem 2</div>
+  <h2>The cost of polling</h2>
+  <p>Every waiting request asks Redis "is it done yet?" four times a second. Almost every answer is "no." Count how many questions it takes to get four answers.</p>
+</section>
+
+<section class="stage" id="fix" data-scene="fix">
+  <div class="eyebrow">Animation 3 · The improved design</div>
+  <h2>Notifications for the front door, atomic pops for the workers</h2>
+  <p>The web front door opens a connection and <em>subscribes</em> to its result key before pushing work. Redis sends exactly one message, the moment the worker writes the key. Workers switch to a pop that removes items as it reads them, so each item goes to exactly one worker. (Workers still check the queue on a timer; we leave that alone today.)</p>
+</section>
+
+<section class="stage" id="scale">
+  <div class="eyebrow">4 · Scale</div>
+  <h2>10s, 100s, 1,000s, 1,000,000s of requests per second</h2>
+  <p>Same image classifier, two architectures. <b>Original:</b> polling front door, one worker (a second one causes duplicate and lost work). <b>Updated:</b> notifications to the front door, atomic pop so you can run as many workers as the load needs.</p>
+  <div class="legend"><span style="--c: var(--s-orig)">Original</span><span style="--c: var(--s-new)">Updated</span></div>
+  <div class="charts">
+    <div class="chart" id="chartAnswered"><h3>Requests answered per second</h3><div class="sub">Log scale. Original tops out at one worker's speed.</div></div>
+    <div class="chart" id="chartCommands"><h3>Redis commands per second, one minute in</h3><div class="sub">Log scale. Original's backlog keeps polling and keeps growing.</div></div>
+  </div>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Incoming load</th><th>Original (polling, 1 worker)</th><th>Updated (notifications, many workers)</th></tr></thead>
+      <tbody>
+        <tr><td>10 req/s</td><td><span class="tag ok">works</span> One worker keeps up. ~9 GETs per request, almost all empty: ~124 Redis commands/s.</td><td><span class="tag ok">works</span> 1 worker. ~7 commands per request: ~70/s. Answers arrive the instant they're ready instead of up to 0.25 s later.</td></tr>
+        <tr><td>100 req/s</td><td><span class="tag no">falls behind</span> Answers ~16/s; the queue grows by ~84 every second. After 1 minute ~5,000 requests are waiting, each polling 4×/s: ~20,000 commands/s and climbing. Clients time out.</td><td><span class="tag ok">works</span> ~7 workers. ~700 commands/s.</td></tr>
+        <tr><td>1,000 req/s</td><td><span class="tag no">collapses</span> ~59,000 waiting after 1 minute → ~236,000 commands/s, which is past what one Redis node comfortably serves. The polling itself takes Redis down.</td><td><span class="tag ok">works</span> ~63 workers. ~7,000 commands/s. One Redis node is fine.</td></tr>
+        <tr><td>1,000,000 req/s</td><td><span class="tag no">impossible</span> ~240 million commands/s of "is it done yet?"</td><td><span class="tag ok">needs sharding</span> ~62,500 CPU workers (or ~2,000 GPU workers). ~7 million commands/s is more than one Redis node can take, so keys and queues get split across many Redis nodes. Which node owns which key? That's <b>consistent hashing</b>, our next video.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Rough model: one CPU worker classifies about 16 images/s (a batch of 32 in ~2 s); polling every 0.25 s; one Redis node handles on the order of 100,000+ simple commands/s. Real numbers depend on hardware, but the shape holds: the original design is capped at one worker and its polling grows with the backlog.</p>
+</section>
+</div>
+
+<template id="stageTpl">
+  <div class="controls">
+    <button type="button" class="primary" data-act="play">Play</button>
+    <button type="button" data-act="back" aria-label="Previous step">◀ Back</button>
+    <button type="button" data-act="next" aria-label="Next step">Next ▶</button>
+    <button type="button" data-act="reset">Restart</button>
+    <select data-act="speed" aria-label="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+    <div class="counters"></div>
+  </div>
+  <div class="diagram"><svg viewBox="0 0 1100 440" role="img"></svg></div>
+  <div class="below">
+    <div class="caption" aria-live="polite"><div class="stepno"></div><h3></h3><pre></pre><p class="txt"></p></div>
+    <ol class="steps"></ol>
+  </div>
+</template>
+
+<script>
+(() => {
+const NS = "http://www.w3.org/2000/svg";
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const BOX = {
+  client: { x: 10, y: 178, w: 112, h: 86, t: "Client", s: "simple_request.py" },
+  web: { x: 200, y: 150, w: 175, h: 140, t: "Web front door", s: "run_web_server.py" },
+  redis: { x: 490, y: 14, w: 270, h: 412, t: "Redis", s: "" },
+};
+const WORKER_Y = { 1: [170], 2: [80, 260], 3: [24, 170, 316] };
+
+class Scene {
+  constructor(section, cfg) {
+    this.cfg = cfg;
+    section.appendChild(document.getElementById("stageTpl").content.cloneNode(true));
+    this.svg = section.querySelector("svg");
+    this.svg.setAttribute("aria-label", cfg.label);
+    this.cap = section.querySelector(".caption");
+    this.list = section.querySelector("ol.steps");
+    this.ctrEl = section.querySelector(".counters");
+    this.btn = a => section.querySelector(`[data-act="${a}"]`);
+    this.speed = 1; this.fast = false; this.gen = 0;
+    cfg.steps.forEach((st, i) => {
+      const li = document.createElement("li");
+      li.textContent = st.title;
+      li.addEventListener("click", () => this.jump(i + 1));
+      this.list.appendChild(li);
+    });
+    this.btn("play").onclick = () => this.playing ? this.pause() : this.play();
+    this.btn("next").onclick = () => this.next();
+    this.btn("back").onclick = () => this.jump(Math.max(0, this.i - 1));
+    this.btn("reset").onclick = () => this.jump(0);
+    this.btn("speed").onchange = e => { this.speed = +e.target.value; };
+    this.build();
+    this.reset();
+  }
+
+  // ---------- static drawing ----------
+  build() {
+    const svg = this.svg;
+    const wires = el("g", {}, svg);
+    this.static = el("g", {}, svg);
+    this.dyn = el("g", {}, svg);
+    this.pk = el("g", {}, svg);
+    this.nodes = {};
+    const node = (key, b, cls) => {
+      const g = el("g", { class: "node " + cls }, this.static);
+      el("rect", { class: "box", x: b.x, y: b.y, width: b.w, height: b.h, rx: 10 }, g);
+      el("text", { class: "t", x: b.x + 12, y: b.y + 24 }, g).textContent = b.t;
+      if (b.s) el("text", { class: "s", x: b.x + 12, y: b.y + 41 }, g).textContent = b.s;
+      const st = el("text", { class: "st", x: b.x + 12, y: b.y + b.h - 12 }, g);
+      this.nodes[key] = { g, b, st };
+    };
+    node("client", BOX.client, "");
+    node("web", BOX.web, "");
+    node("redis", BOX.redis, "redis");
+    this.workers = WORKER_Y[this.cfg.workers].map((y, i) => {
+      const b = { x: 900, y, w: 188, h: 100, t: `Worker ${i + 1}`, s: "run_model_server.py" };
+      node("w" + i, b, "");
+      return b;
+    });
+    el("line", { class: "wire", x1: 122, y1: 221, x2: 200, y2: 221 }, wires);
+    el("line", { class: "wire", x1: 375, y1: 220, x2: 490, y2: 220 }, wires);
+    this.workers.forEach(b => el("line", { class: "wire", x1: 760, y1: b.y + 50, x2: 900, y2: b.y + 50 }, wires));
+    const r = BOX.redis;
+    el("text", { class: "lbl", x: r.x + 14, y: r.y + 52 }, this.static).textContent = "image_queue  (list)";
+    el("rect", { class: "lane", x: r.x + 12, y: r.y + 60, width: 246, height: 50, rx: 6 }, this.static);
+    el("text", { class: "lbl", x: r.x + 14, y: r.y + 140 }, this.static).textContent = "result keys  (strings)";
+  }
+
+  // ---------- state ----------
+  reset() {
+    this.gen++;
+    this.playing = false;
+    this.i = 0;
+    this.queue = []; this.keys = []; this.sub = null;
+    this.dyn.innerHTML = ""; this.pk.innerHTML = "";
+    this.counts = {};
+    for (const [k] of this.cfg.counters) this.counts[k] = 0;
+    for (const k in this.nodes) this.status(k, "");
+    this.cfg.init?.(this);
+    this.render();
+    this.renderCounters();
+    this.showCaption(null);
+  }
+  status(k, text) { this.nodes[k].st.textContent = text; }
+  inc(k, n = 1) { this.counts[k] += n; this.renderCounters(); }
+  renderCounters() {
+    this.ctrEl.innerHTML = "";
+    for (const [k, label, tone] of this.cfg.counters) {
+      const d = document.createElement("span");
+      d.className = "counter " + (tone || "");
+      d.innerHTML = `${label}: <b>${this.counts[k]}</b>`;
+      this.ctrEl.appendChild(d);
+    }
+  }
+  render() {
+    this.dyn.innerHTML = "";
+    const r = BOX.redis;
+    if (!this.queue.length) el("text", { class: "lbl", x: r.x + 26, y: r.y + 90 }, this.dyn).textContent = "(empty)";
+    this.queue.forEach((c, i) => {
+      const g = el("g", { class: "chip " + (c.state || "") }, this.dyn);
+      const x = r.x + 17 + i * 40, y = r.y + 66;
+      el("rect", { x, y, width: 36, height: 38, rx: 5 }, g);
+      el("text", { x: x + 18, y: y + 24, "text-anchor": "middle" }, g).textContent = c.id;
+    });
+    this.keys.forEach((k, i) => {
+      const g = el("g", { class: "key " + (k.state || "") }, this.dyn);
+      const y = r.y + 150 + i * 36;
+      el("rect", { x: r.x + 12, y, width: 246, height: 30, rx: 5 }, g);
+      el("text", { x: r.x + 20, y: y + 19 }, g).textContent = k.name;
+      el("text", { class: "v", x: r.x + 250, y: y + 19, "text-anchor": "end" }, g).textContent =
+        k.state === "set" ? "[{label,prob} ×5]" : k.state === "orphan" ? "orphan, never read" : "(nil)";
+    });
+    if (this.sub) {
+      el("line", { class: "sub", x1: 375, y1: 262, x2: 490, y2: 262 }, this.dyn);
+      el("text", { class: "sublbl", x: 380, y: 284 }, this.dyn).textContent = this.sub;
+    }
+  }
+  setKey(name, state) {
+    const k = this.keys.find(k => k.name === name);
+    if (k) k.state = state; else this.keys.push({ name, state });
+    this.render();
+  }
+  delKey(name) { this.keys = this.keys.filter(k => k.name !== name); this.render(); }
+
+  // ---------- animation ----------
+  dur(ms) { return this.fast || REDUCED ? 0 : ms / this.speed; }
+  async wait(ms) { const g = this.gen; const d = this.dur(ms); if (d) await sleep(d); if (g !== this.gen) throw "cancel"; }
+  // anchor points
+  webR(dy = 0) { return { x: 375, y: 220 + dy }; }
+  redisL(dy = 0) { return { x: 490, y: 220 + dy }; }
+  redisR(i, dy = 0) { return { x: 760, y: this.workers[i].y + 50 + dy }; }
+  wL(i, dy = 0) { return { x: 900, y: this.workers[i].y + 50 + dy }; }
+  clientR(dy = 0) { return { x: 122, y: 221 + dy }; }
+  webL(dy = 0) { return { x: 200, y: 221 + dy }; }
+  send(a, b, label, kind = "cmd", ms = 900) {
+    const g0 = this.gen;
+    const d = this.dur(ms);
+    if (!d) return Promise.resolve();
+    const g = el("g", { class: "pk " + kind }, this.pk);
+    const rect = el("rect", { rx: 6, height: 24, y: -12 }, g);
+    const t = el("text", {}, g);
+    t.textContent = label;
+    let w = label.length * 7.3;
+    try { w = t.getComputedTextLength() || w; } catch (e) {}
+    rect.setAttribute("width", w + 16); rect.setAttribute("x", -(w + 16) / 2);
+    return new Promise((res, rej) => {
+      const start = performance.now();
+      const frame = now => {
+        if (g0 !== this.gen) { g.remove(); return rej("cancel"); }
+        const p = Math.min(1, (now - start) / d);
+        const e = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+        g.setAttribute("transform", `translate(${a.x + (b.x - a.x) * e},${a.y + (b.y - a.y) * e - 16})`);
+        if (p < 1) requestAnimationFrame(frame); else { g.remove(); res(); }
+      };
+      requestAnimationFrame(frame);
+    });
+  }
+
+  // ---------- player ----------
+  showCaption(i) {
+    const st = i == null ? this.cfg.intro : this.cfg.steps[i];
+    this.cap.querySelector(".stepno").textContent = i == null ? `${this.cfg.steps.length} steps · press Play or Next` : `Step ${i + 1} of ${this.cfg.steps.length}`;
+    this.cap.querySelector("h3").textContent = st.title;
+    this.cap.querySelector("pre").textContent = st.cmd || "";
+    this.cap.querySelector(".txt").innerHTML = st.text || "";
+    [...this.list.children].forEach((li, k) => {
+      li.className = i != null && k < i ? "done" : k === i ? "now" : "";
+    });
+    this.updateButtons();
+  }
+  updateButtons() {
+    this.btn("play").textContent = this.playing ? "Pause" : this.i >= this.cfg.steps.length ? "Replay" : "Play";
+    this.btn("next").disabled = this.busy || this.i >= this.cfg.steps.length;
+    this.btn("back").disabled = this.i === 0;
+  }
+  async runStep() {
+    const i = this.i;
+    this.busy = true;
+    this.showCaption(i);
+    try { await this.cfg.steps[i].run(this); } catch (e) { if (e !== "cancel") console.error(e); this.busy = false; return false; }
+    this.i = i + 1;
+    this.busy = false;
+    this.updateButtons();
+    return true;
+  }
+  async next() { if (this.busy || this.i >= this.cfg.steps.length) return; await this.runStep(); }
+  async play() {
+    if (this.i >= this.cfg.steps.length) this.reset();
+    this.playing = true; this.updateButtons();
+    const g = this.gen;
+    while (this.busy) await sleep(50);
+    while (this.playing && g === this.gen && this.i < this.cfg.steps.length) {
+      if (!(await this.runStep())) return;
+      if (this.playing && this.i < this.cfg.steps.length) { try { await this.wait(1100); } catch (e) { return; } }
+    }
+    this.playing = false; this.updateButtons();
+  }
+  pause() { this.playing = false; this.updateButtons(); }
+  async jump(n) {
+    this.reset();
+    this.fast = true;
+    for (let k = 0; k < n; k++) { this.showCaption(k); await this.cfg.steps[k].run(this); this.i = k + 1; }
+    this.fast = false;
+    this.pk.innerHTML = "";
+    this.busy = false;
+    if (n > 0) this.showCaption(n - 1); else this.showCaption(null);
+    this.updateButtons();
+  }
+}
+
+// ---------- shared moves ----------
+const U = "7f3a9c2e";
+async function webPoll(s, key, n, { dy = 0, onEmpty } = {}) {
+  for (let t = 0; t < n; t++) {
+    await s.send(s.webR(dy - 6), s.redisL(dy - 6), `GET ${key}`, "cmd", 650);
+    onEmpty?.();
+    await s.send(s.redisL(dy + 6), s.webR(dy + 6), "(nil)", "nil", 550);
+    await s.wait(250);
+  }
+}
+
+// ---------- Scene 1: today ----------
+const today = {
+  label: "Animated diagram: client, web front door, Redis and one worker exchanging polling commands",
+  workers: 1,
+  counters: [["cmds", "Redis commands"], ["empty", "Polls that found nothing", "bad"]],
+  init: s => { s.status("w0", "polling every 0.25 s"); s.status("web", "idle"); },
+  intro: { title: "One request, start to finish", text: "Press <b>Play</b> to run it, or <b>Next</b> to go one step at a time. Click any step in the list to jump there." },
+  steps: [
+    { title: "The worker is already polling", cmd: "LRANGE image_queue 0 31     →  []\n(sleep 0.25 s, repeat forever)",
+      text: "Before any request shows up, the worker asks Redis for up to 32 queued images, gets an empty list, sleeps a quarter second and asks again.",
+      run: async s => { for (let k = 0; k < 2; k++) { await s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 650); s.inc("cmds"); s.inc("empty"); await s.send(s.redisR(0), s.wL(0), "[ ]", "nil", 500); await s.wait(250); } } },
+    { title: "Client uploads an image", cmd: "POST /predict   (castle_image.jpg)",
+      text: "<code>simple_request.py</code> sends the photo to Flask's <code>/predict</code> route. The HTTP request stays open until the web server has an answer.",
+      run: async s => { await s.send(s.clientR(), s.webL(), "POST castle.jpg", "data"); s.status("client", "waiting…"); s.status("web", "got image"); } },
+    { title: "Web front door builds the JSON blob", cmd: `image → resize 224×224 → float32 array → base64\nk = str(uuid.uuid4())          # "${U}-…"\nd = {"id": k, "image": "AAAAPwAAgD8AAIA/…"}   # ≈800 KB of text`,
+      text: "The image becomes a NumPy array, then base64 text. A fresh UUID names this request; it becomes the key the answer will be written to.",
+      run: async s => { s.status("web", `k = ${U}…`); await s.wait(900); } },
+    { title: "RPUSH the JSON onto the queue", cmd: `RPUSH image_queue '{"id": "${U}-…", "image": "AAAAPwAA…"}'`,
+      text: "The blob goes on the right end of the Redis list <code>image_queue</code>. The web server now knows which key to watch: <code>" + U + "-…</code>.",
+      run: async s => { await s.send(s.webR(), s.redisL(), "RPUSH {id, image}", "data"); s.inc("cmds"); s.queue.push({ id: U.slice(0, 3) }); s.setKey(U + "-…", null); s.status("web", "polling for result"); } },
+    { title: "Web front door starts polling the key", cmd: `GET ${U}-…   →  (nil)\ntime.sleep(0.25)\nGET ${U}-…   →  (nil)`,
+      text: "The result key doesn't exist yet, so <code>GET</code> returns nothing. The web server sleeps and asks again, in a loop.",
+      run: async s => { await webPoll(s, U, 2, { onEmpty: () => { s.inc("cmds"); s.inc("empty"); } }); } },
+    { title: "Worker's next poll finds the job", cmd: "LRANGE image_queue 0 31   →  ['{\"id\": \"" + U + "-…\", …}']",
+      text: "<code>LRANGE</code> <b>reads</b> up to 32 items. It does not remove them; the job stays in the list (dashed outline).",
+      run: async s => { await s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 650); s.inc("cmds"); s.queue[0].state = "read"; s.render(); await s.send(s.redisR(0), s.wL(0), "[ {id, image} ]", "data"); s.status("w0", "decode + ResNet50…"); } },
+    { title: "Worker classifies; front door keeps asking", cmd: "model.predict(batch)          # worker, ~1–2 s\nGET " + U + "-…  →  (nil)   # web, every 0.25 s",
+      text: "While the model runs, the web server's questions keep coming back empty. Each one is a round trip to Redis that does no useful work.",
+      run: async s => { await webPoll(s, U, 3, { onEmpty: () => { s.inc("cmds"); s.inc("empty"); } }); } },
+    { title: "Worker writes the answer to the key", cmd: `SET ${U}-… '[{"label": "…", "probability": …}, … top 5]'`,
+      text: "The worker stores the top-5 predictions as JSON under the same UUID the web server is watching.",
+      run: async s => { await s.send(s.wL(0), s.redisR(0), "SET " + U + " [preds]", "data"); s.inc("cmds"); s.setKey(U + "-…", "set"); s.status("w0", "trimming queue"); } },
+    { title: "Worker trims the queue", cmd: "LTRIM image_queue 1 -1      # drop the first len(imageIDs) items",
+      text: "Only now is the job removed, by <em>position</em>: \"drop the first 1 item.\" Remember this for the next animation.",
+      run: async s => { await s.send(s.wL(0), s.redisR(0), "LTRIM 1 -1", "cmd", 650); s.inc("cmds"); s.queue[0].state = "gone"; s.render(); await s.wait(500); s.queue = []; s.render(); s.status("w0", "polling every 0.25 s"); } },
+    { title: "Next poll finds it; key deleted", cmd: `GET ${U}-…   →  '[{"label": …}, …]'\nDEL ${U}-…`,
+      text: "Up to 0.25 s after the answer landed, the web server's next <code>GET</code> finally sees it. It deletes the key to keep Redis clean.",
+      run: async s => { await s.send(s.webR(-6), s.redisL(-6), `GET ${U}`, "cmd", 650); s.inc("cmds"); await s.send(s.redisL(6), s.webR(6), "[preds]", "data"); await s.send(s.webR(), s.redisL(), `DEL ${U}`, "cmd", 650); s.inc("cmds"); s.delKey(U + "-…"); } },
+    { title: "Response goes back to the client", cmd: '{"success": true, "predictions": [ … top 5 … ]}',
+      text: "The HTTP request that's been open this whole time finally returns. Look at the counter: most of the Redis commands found nothing.",
+      run: async s => { await s.send(s.webL(), s.clientR(), "200 {predictions}", "data"); s.status("client", "done ✓"); s.status("web", "idle"); } },
+  ],
+};
+
+// ---------- Scene 2a: two workers ----------
+const workers = {
+  label: "Animated diagram: two workers read the same jobs, then one trims away a job nobody processed",
+  workers: 2,
+  counters: [["dup", "Duplicate classifications", "bad"], ["lost", "Lost requests", "bad"], ["orphan", "Orphan keys", "bad"]],
+  init: s => { s.status("w0", "polling"); s.status("w1", "polling"); s.status("web", "3 requests coming"); },
+  intro: { title: "Two workers, three requests", text: "Same code as before, just started twice. Watch the queue and the counters." },
+  steps: [
+    { title: "Requests A and B are queued", cmd: "RPUSH image_queue '{\"id\": \"A\", …}'\nRPUSH image_queue '{\"id\": \"B\", …}'",
+      text: "The web server pushes two jobs and starts polling keys A and B.",
+      run: async s => { await s.send(s.webR(), s.redisL(), "RPUSH A", "data", 700); s.queue.push({ id: "A" }); s.setKey("A", null); s.render();
+        await s.send(s.webR(), s.redisL(), "RPUSH B", "data", 700); s.queue.push({ id: "B" }); s.setKey("B", null); s.status("web", "polling A, B"); } },
+    { title: "Both workers poll at the same moment", cmd: "Worker 1: LRANGE image_queue 0 31  →  [A, B]\nWorker 2: LRANGE image_queue 0 31  →  [A, B]",
+      text: "<code>LRANGE</code> only reads, so both workers get the <b>same two jobs</b>. Nothing tells worker 2 that worker 1 already took them.",
+      run: async s => { await Promise.all([s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 650), s.send(s.wL(1), s.redisR(1), "LRANGE 0 31", "cmd", 650)]);
+        s.queue.forEach(c => c.state = "read"); s.render();
+        await Promise.all([s.send(s.redisR(0), s.wL(0), "[A, B]", "data"), s.send(s.redisR(1), s.wL(1), "[A, B]", "data")]);
+        s.status("w0", "classifying A, B"); s.status("w1", "classifying A, B"); s.inc("dup", 2); } },
+    { title: "Request C arrives while they work", cmd: "RPUSH image_queue '{\"id\": \"C\", …}'     →  queue: [A, B, C]",
+      text: "Both workers are busy doing the same work twice. Meanwhile a third job lands at the end of the list.",
+      run: async s => { await s.send(s.webR(), s.redisL(), "RPUSH C", "data", 800); s.queue.push({ id: "C" }); s.setKey("C", null); s.status("web", "polling A, B, C"); } },
+    { title: "Worker 1 finishes and trims 2 items", cmd: "SET A '[…]'   SET B '[…]'\nLTRIM image_queue 2 -1      →  queue: [C]",
+      text: "Worker 1 writes both answers and removes the first two positions. So far so good: A and B are gone, C is still waiting.",
+      run: async s => { await s.send(s.wL(0), s.redisR(0), "SET A, SET B", "data"); s.setKey("A", "set"); s.setKey("B", "set");
+        await s.send(s.wL(0), s.redisR(0), "LTRIM 2 -1", "cmd", 650); s.queue[0].state = s.queue[1].state = "gone"; s.render(); await s.wait(400); s.queue = s.queue.slice(2); s.render(); s.status("w0", "polling"); } },
+    { title: "Web front door answers A and B", cmd: "GET A → '[…]'   DEL A\nGET B → '[…]'   DEL B",
+      text: "Requests A and B complete normally and their keys are deleted.",
+      run: async s => { await s.send(s.webR(-6), s.redisL(-6), "GET A, GET B", "cmd", 650); await s.send(s.redisL(6), s.webR(6), "[A preds] [B preds]", "data");
+        await s.send(s.webR(), s.redisL(), "DEL A, DEL B", "cmd", 650); s.delKey("A"); s.delKey("B"); await s.send(s.webL(), s.clientR(), "200 A, 200 B", "data"); } },
+    { title: "Worker 2 finishes the same work", cmd: "SET A '[…]'   SET B '[…]'    # keys nobody will ever read\nLTRIM image_queue 2 -1      →  queue: []   (C is gone!)",
+      text: "Worker 2 rewrites A and B. Nobody is waiting for them anymore, so those keys sit in Redis forever. Then its <code>LTRIM 2 -1</code> removes two positions from a list that only holds C. <b>C is deleted without ever being classified.</b>",
+      run: async s => { await s.send(s.wL(1), s.redisR(1), "SET A, SET B", "bad"); s.setKey("A", "orphan"); s.setKey("B", "orphan"); s.inc("orphan", 2);
+        await s.send(s.wL(1), s.redisR(1), "LTRIM 2 -1", "bad", 650); s.queue[0].state = "gone"; s.render(); await s.wait(600); s.queue = []; s.render(); s.inc("lost"); s.status("w1", "polling"); } },
+    { title: "Request C never gets an answer", cmd: "GET C → (nil)\nGET C → (nil)\nGET C → (nil)   … forever",
+      text: "The web server polls key C forever, and the user's request hangs. This is the bug the project's README warns about: \"some requests never return while two workers are running.\"",
+      run: async s => { s.status("web", "C: waiting forever"); await webPoll(s, "C", 3); } },
+    { title: "So the original design is stuck at one worker", cmd: "",
+      text: "More workers means duplicate work, leaked keys and lost requests. The fix has to make <em>read</em> and <em>remove</em> a single step, so no two workers can ever get the same item. That's Animation 3.",
+      run: async s => { await s.wait(300); } },
+  ],
+};
+
+// ---------- Scene 2b: polling cost ----------
+const polling = {
+  label: "Animated diagram: four waiting requests each polling Redis while one worker classifies",
+  workers: 1,
+  counters: [["gets", "GETs sent"], ["hits", "GETs that found an answer", "good"], ["lr", "Empty LRANGEs", "bad"]],
+  init: s => { s.status("w0", "idle, polling"); s.status("web", "idle"); },
+  intro: { title: "Four requests, one batch", text: "Watch the GET counter climb while only four of them are useful." },
+  steps: [
+    { title: "An idle worker still asks", cmd: "LRANGE image_queue 0 31  →  []    × 4 per second",
+      text: "Even with no traffic, every worker sends 4 commands a second: <b>345,600 a day</b> per worker, all answered \"nothing.\"",
+      run: async s => { for (let k = 0; k < 3; k++) { await s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 550); s.inc("lr"); await s.send(s.redisR(0), s.wL(0), "[ ]", "nil", 450); await s.wait(200); } } },
+    { title: "Four requests arrive", cmd: "RPUSH image_queue A   RPUSH image_queue B\nRPUSH image_queue C   RPUSH image_queue D",
+      text: "Four users upload images at about the same time.",
+      run: async s => { for (const id of "ABCD") { await s.send(s.webR(), s.redisL(), "RPUSH " + id, "data", 450); s.queue.push({ id }); s.setKey(id, null); } s.status("web", "4 requests waiting"); } },
+    { title: "The worker grabs all four as one batch", cmd: "LRANGE image_queue 0 31  →  [A, B, C, D]",
+      text: "Batching is good: one model call classifies all four.",
+      run: async s => { await s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 600); s.queue.forEach(c => c.state = "read"); s.render(); await s.send(s.redisR(0), s.wL(0), "[A, B, C, D]", "data"); s.status("w0", "classifying 4 (~2 s)"); } },
+    { title: "Every waiting request polls", cmd: "GET A → (nil)   GET B → (nil)   GET C → (nil)   GET D → (nil)\n… 4 requests × 4 times a second, for ~2 seconds",
+      text: "Each request runs its own loop. Four waiting requests means 16 GETs a second, and every one of them is answered \"not yet.\"",
+      run: async s => { const on = () => s.inc("gets"); await Promise.all(["A", "B", "C", "D"].map((id, k) => s.wait(k * 120).then(() => webPoll(s, id, 4, { dy: -54 + k * 36, onEmpty: on })))); } },
+    { title: "Results land", cmd: "SET A '[…]'  SET B '[…]'  SET C '[…]'  SET D '[…]'\nLTRIM image_queue 4 -1",
+      text: "The answers are ready, but nobody knows yet. Each request finds out only at its next poll, up to 0.25 s later.",
+      run: async s => { await s.send(s.wL(0), s.redisR(0), "SET A B C D", "data"); for (const id of "ABCD") s.setKey(id, "set"); await s.send(s.wL(0), s.redisR(0), "LTRIM 4 -1", "cmd", 600); s.queue = []; s.render(); s.status("w0", "idle, polling"); } },
+    { title: "Next polls find them", cmd: "GET A → '[…]'  GET B → '[…]'  GET C → '[…]'  GET D → '[…]'\nDEL A  DEL B  DEL C  DEL D",
+      text: "Four useful answers. Look at how many GETs it took to get them.",
+      run: async s => { await Promise.all(["A", "B", "C", "D"].map(async (id, k) => { await s.wait(k * 100); await s.send(s.webR(-54 + k * 36 - 6), s.redisL(-54 + k * 36 - 6), "GET " + id, "cmd", 600); s.inc("gets"); s.inc("hits"); await s.send(s.redisL(-54 + k * 36 + 6), s.webR(-54 + k * 36 + 6), "[" + id + " preds]", "data", 550); s.delKey(id); }));
+        s.status("web", "idle"); } },
+    { title: "Now multiply it", cmd: "1,000 waiting requests × 4 GETs/s  =  4,000 GETs/s\n100 idle workers       × 4 LRANGE/s =   400 LRANGEs/s",
+      text: "Polling cost grows with <b>how many requests are waiting</b> and <b>how long they wait</b>, not with useful work. A slower model or a backed-up queue makes polling worse exactly when the system is already struggling.",
+      run: async s => { await s.wait(300); } },
+  ],
+};
+
+// ---------- Scene 3: the fix ----------
+const fix = {
+  label: "Animated diagram: web front door subscribes to key notifications; three workers pop distinct jobs",
+  workers: 3,
+  counters: [["polls", "Front-door polls", "good"], ["notes", "Notifications sent"], ["dup", "Duplicate work", "good"]],
+  init: s => { s.status("w0", "polling queue"); s.status("w1", "polling queue"); s.status("w2", "polling queue"); s.status("web", "idle"); },
+  intro: { title: "Three requests, three workers", text: "Same Redis, two changes: the front door listens instead of asking, and workers pop instead of read-then-trim." },
+  steps: [
+    { title: "Subscribe first, on an open connection", cmd: "CONFIG SET notify-keyspace-events KEA        # once, on the database\nPSUBSCRIBE __keyspace@0__:A   (and B, C)",
+      text: "Before pushing any work, the web server tells Redis: \"when key A changes, tell me.\" The connection stays open and Redis can push to it. Subscribing <em>first</em> means the notification can't arrive before we're listening.",
+      run: async s => { await s.send(s.webR(), s.redisL(), "PSUBSCRIBE A, B, C", "notify"); s.sub = "listening on open connection"; s.render(); s.status("web", "listening"); } },
+    { title: "Push the three jobs", cmd: "RPUSH image_queue '{\"id\": \"A\", …}'   (B, C the same)",
+      text: "Same JSON blobs as before. After this the front door sends nothing; it just waits for a message.",
+      run: async s => { for (const id of "ABC") { await s.send(s.webR(-30), s.redisL(-30), "RPUSH " + id, "data", 500); s.queue.push({ id }); s.setKey(id, null); } } },
+    { title: "Workers pop: read + remove in one step", cmd: "Worker 1: LPOP image_queue   →  A\nWorker 2: LPOP image_queue   →  B\nWorker 3: LPOP image_queue   →  C\n(batch version: LPOP image_queue 32)",
+      text: "<code>LPOP</code> takes the item <b>and</b> removes it in one atomic command. Redis runs commands one at a time, so even if all three workers ask at the same instant, each gets a different item. No duplicates, nothing trimmed by mistake.",
+      run: async s => { await Promise.all([0, 1, 2].map(i => s.send(s.wL(i), s.redisR(i), "LPOP", "cmd", 600)));
+        const ids = s.queue.map(c => c.id); s.queue = []; s.render();
+        await Promise.all([0, 1, 2].map(i => s.send(s.redisR(i), s.wL(i), ids[i], "data", 700)));
+        ids.forEach((id, i) => s.status("w" + i, "classifying " + id)); } },
+    { title: "Three workers, three times the throughput", cmd: "",
+      text: "Each worker runs the model on its own job in parallel. Need more throughput? Start more workers.",
+      run: async s => { await s.wait(1000); } },
+    { title: "Worker 2 writes B; Redis notifies immediately", cmd: "SET B '[…]'\n→ Redis pushes:  pmessage  __keyspace@0__:B  \"set\"",
+      text: "The moment the key is written, Redis sends <b>one</b> message down the open connection. No sleep, no up-to-0.25 s delay, no empty GETs.",
+      run: async s => { await s.send(s.wL(1), s.redisR(1), "SET B [preds]", "data"); s.setKey("B", "set"); s.status("w1", "polling queue");
+        await s.send({ x: 490, y: 262 }, { x: 375, y: 262 }, "B: set", "notify", 700); s.inc("notes"); } },
+    { title: "Front door fetches B once and replies", cmd: "GET B  →  '[…]'\nDEL B\nPUNSUBSCRIBE __keyspace@0__:B",
+      text: "One GET, guaranteed to find the data, because the notification only comes after the SET.",
+      run: async s => { await s.send(s.webR(-30), s.redisL(-30), "GET B", "cmd", 600); await s.send(s.redisL(-18), s.webR(-18), "[B preds]", "data", 600); s.delKey("B"); await s.send(s.webL(), s.clientR(), "200 B", "data", 700); } },
+    { title: "A and C finish the same way", cmd: "SET A → notify A → GET A, DEL A\nSET C → notify C → GET C, DEL C",
+      text: "One notification per result, delivered when it's ready.",
+      run: async s => { await Promise.all([s.send(s.wL(0), s.redisR(0), "SET A", "data"), s.send(s.wL(2), s.redisR(2), "SET C", "data")]); s.setKey("A", "set"); s.setKey("C", "set"); s.status("w0", "polling queue"); s.status("w2", "polling queue");
+        await s.send({ x: 490, y: 262 }, { x: 375, y: 262 }, "A: set   C: set", "notify", 700); s.inc("notes", 2);
+        await s.send(s.webR(-30), s.redisL(-30), "GET A, GET C", "cmd", 600); await s.send(s.redisL(-18), s.webR(-18), "[A] [C]", "data", 600); s.delKey("A"); s.delKey("C"); await s.send(s.webL(), s.clientR(), "200 A, 200 C", "data", 700); s.sub = null; s.render(); s.status("web", "idle"); } },
+    { title: "Tally", cmd: "Per request, the front door sends:  PSUBSCRIBE, RPUSH, GET, DEL, PUNSUBSCRIBE\n…whether the model takes 0.1 s or 10 s.",
+      text: "Zero polls from the front door, one notification per answer, no duplicate work. The cost per request is now fixed instead of growing with wait time, and workers scale out.",
+      run: async s => { await s.wait(300); } },
+  ],
+};
+
+const SCENES = { today, workers, polling, fix };
+document.querySelectorAll("section[data-scene]").forEach(sec => new Scene(sec, SCENES[sec.dataset.scene]));
+
+// ---------- charts ----------
+const cats = ["10/s", "100/s", "1,000/s", "1,000,000/s"];
+const fmt = v => v >= 1e6 ? (v / 1e6).toLocaleString() + "M" : v >= 1e3 ? (v / 1e3).toLocaleString() + "K" : String(v);
+function barChart(id, series, maxExp, unit) {
+  const host = document.getElementById(id);
+  const tip = document.createElement("div"); tip.className = "tip"; tip.hidden = true; host.appendChild(tip);
+  const W = 520, H = 290, L = 48, R = 10, T = 22, B = 34;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": host.querySelector("h3").textContent }, host);
+  const y = v => T + (H - T - B) * (1 - Math.log10(Math.max(v, 1)) / maxExp);
+  for (let e = 0; e <= maxExp; e++) {
+    el("line", { class: "grid", x1: L, x2: W - R, y1: y(10 ** e), y2: y(10 ** e) }, svg);
+    el("text", { x: L - 6, y: y(10 ** e) + 4, "text-anchor": "end" }, svg).textContent = fmt(10 ** e);
+  }
+  const gw = (W - L - R) / cats.length, bw = 28;
+  cats.forEach((c, ci) => {
+    const cx = L + gw * ci + gw / 2;
+    el("text", { x: cx, y: H - 12, "text-anchor": "middle" }, svg).textContent = c;
+    series.forEach((s, si) => {
+      const v = s.values[ci], x = cx + (si === 0 ? -bw - 1 : 1), top = y(v), base = y(1);
+      const h = Math.max(base - top, 2);
+      const r = Math.min(4, h / 2);
+      el("path", { class: "", d: `M${x},${base} V${base - h + r} Q${x},${base - h} ${x + r},${base - h} H${x + bw - r} Q${x + bw},${base - h} ${x + bw},${base - h + r} V${base} Z`, fill: `var(${s.color})` }, svg);
+      el("text", { class: "val", x: x + bw / 2, y: base - h - 5, "text-anchor": "middle" }, svg).textContent = fmt(v);
+      const hit = el("rect", { class: "hit", x: x - 2, y: T, width: bw + 4, height: base - T }, svg);
+      hit.addEventListener("mousemove", ev => {
+        tip.textContent = `${s.name} at ${c} incoming: ~${v.toLocaleString()} ${unit}`;
+        tip.hidden = false;
+        const hb = host.getBoundingClientRect();
+        tip.style.left = Math.max(4, Math.min(ev.clientX - hb.left + 12, hb.width - tip.offsetWidth - 8)) + "px";
+        tip.style.top = (ev.clientY - hb.top - 36) + "px";
+      });
+      hit.addEventListener("mouseleave", () => tip.hidden = true);
+    });
+  });
+}
+barChart("chartAnswered", [
+  { name: "Original", color: "--s-orig", values: [10, 16, 16, 16] },
+  { name: "Updated", color: "--s-new", values: [10, 100, 1000, 1000000] },
+], 7, "answered/s");
+barChart("chartCommands", [
+  { name: "Original", color: "--s-orig", values: [124, 20300, 236000, 240000000] },
+  { name: "Updated", color: "--s-new", values: [70, 700, 7000, 7000000] },
+], 9, "Redis commands/s");
+})();
+</script>
+
+</body>
+</html>
