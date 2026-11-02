@@ -297,8 +297,17 @@ class Scene {
     this.workers.forEach(b => el("line", { class: "wire", x1: 760, y1: b.y + 50, x2: 900, y2: b.y + 50 }, wires));
     const r = BOX.redis;
     el("text", { class: "lbl", x: r.x + 14, y: r.y + 52 }, this.static).textContent = "image_queue  (list)";
-    el("rect", { class: "lane", x: r.x + 12, y: r.y + 60, width: 246, height: 50, rx: 6 }, this.static);
-    el("text", { class: "lbl", x: r.x + 14, y: r.y + 140 }, this.static).textContent = "result keys  (strings)";
+    el("rect", { class: "lane", x: r.x + 12, y: r.y + 60, width: 246, height: 62, rx: 6 }, this.static);
+    el("text", { class: "lbl", x: r.x + 14, y: r.y + 150 }, this.static).textContent = "result keys  (strings)";
+    // spots where a node can show the image it is holding
+    const spot = (k, x, y, sz) => { const b = this.nodes[k].b; this.nodes[k].img = el("image", { x: b.x + x, y: b.y + y, width: sz, height: sz, visibility: "hidden" }, this.static); };
+    spot("web", 12, 52, 48);
+    this.workers.forEach((b, i) => spot("w" + i, b.w - 46, 6, 40));
+  }
+  nodeImg(k, src) {
+    const im = this.nodes[k].img;
+    if (src) im.setAttribute("href", src);
+    im.setAttribute("visibility", src ? "visible" : "hidden");
   }
 
   // ---------- state ----------
@@ -308,6 +317,7 @@ class Scene {
     this.i = 0;
     this.queue = []; this.keys = []; this.sub = null;
     this.dyn.innerHTML = ""; this.pk.innerHTML = "";
+    for (const k in this.nodes) if (this.nodes[k].img) this.nodeImg(k, null);
     this.counts = {};
     for (const [k] of this.cfg.counters) this.counts[k] = 0;
     for (const k in this.nodes) this.status(k, "");
@@ -330,20 +340,32 @@ class Scene {
   render() {
     this.dyn.innerHTML = "";
     const r = BOX.redis;
-    if (!this.queue.length) el("text", { class: "lbl", x: r.x + 26, y: r.y + 90 }, this.dyn).textContent = "(empty)";
-    this.queue.forEach((c, i) => {
+    if (!this.queue.length) el("text", { class: "lbl", x: r.x + 26, y: r.y + 96 }, this.dyn).textContent = "(empty)";
+    let x = r.x + 17;
+    this.queue.forEach(c => {
       const g = el("g", { class: "chip " + (c.state || "") }, this.dyn);
-      const x = r.x + 17 + i * 40, y = r.y + 66;
-      el("rect", { x, y, width: 36, height: 38, rx: 5 }, g);
-      el("text", { x: x + 18, y: y + 24, "text-anchor": "middle" }, g).textContent = c.id;
+      const y = r.y + 65;
+      if (c.wide) {
+        el("rect", { x, y, width: 200, height: 52, rx: 5 }, g);
+        el("image", { href: c.img, x: x + 5, y: y + 5, width: 42, height: 42 }, g);
+        el("text", { x: x + 54, y: y + 21 }, g).textContent = `{"id": "${c.id.slice(0, 4)}…",`;
+        el("text", { x: x + 54, y: y + 39 }, g).textContent = ` "image": ▦ }`;
+        x += 204;
+      } else {
+        el("rect", { x, y, width: 36, height: 52, rx: 5 }, g);
+        if (c.img) el("image", { href: c.img, x: x + 4, y: y + 4, width: 28, height: 28 }, g);
+        el("text", { x: x + 18, y: y + 46, "text-anchor": "middle" }, g).textContent = c.id;
+        x += 40;
+      }
     });
+    if (!this.keys.length) el("text", { class: "lbl", x: r.x + 26, y: r.y + 178 }, this.dyn).textContent = "(no keys yet: GET on a missing key → nil)";
     this.keys.forEach((k, i) => {
       const g = el("g", { class: "key " + (k.state || "") }, this.dyn);
-      const y = r.y + 150 + i * 36;
+      const y = r.y + 160 + i * 36;
       el("rect", { x: r.x + 12, y, width: 246, height: 30, rx: 5 }, g);
       el("text", { x: r.x + 20, y: y + 19 }, g).textContent = k.name;
       el("text", { class: "v", x: r.x + 250, y: y + 19, "text-anchor": "end" }, g).textContent =
-        k.state === "set" ? "[{label,prob} ×5]" : k.state === "orphan" ? "orphan, never read" : "(nil)";
+        k.state === "orphan" ? "orphan, never read" : "[{label,prob} ×5]";
     });
     if (this.sub) {
       el("line", { class: "sub", x1: 375, y1: 262, x2: 490, y2: 262 }, this.dyn);
@@ -367,17 +389,20 @@ class Scene {
   wL(i, dy = 0) { return { x: 900, y: this.workers[i].y + 50 + dy }; }
   clientR(dy = 0) { return { x: 122, y: 221 + dy }; }
   webL(dy = 0) { return { x: 200, y: 221 + dy }; }
-  send(a, b, label, kind = "cmd", ms = 900) {
+  send(a, b, label, kind = "cmd", ms = 900, img) {
     const g0 = this.gen;
     const d = this.dur(ms);
     if (!d) return Promise.resolve();
     const g = el("g", { class: "pk " + kind }, this.pk);
-    const rect = el("rect", { rx: 6, height: 24, y: -12 }, g);
+    const hgt = img ? 36 : 24;
+    const rect = el("rect", { rx: 6, height: hgt, y: -hgt / 2 }, g);
     const t = el("text", {}, g);
     t.textContent = label;
     let w = label.length * 7.3;
     try { w = t.getComputedTextLength() || w; } catch (e) {}
-    rect.setAttribute("width", w + 16); rect.setAttribute("x", -(w + 16) / 2);
+    const pad = img ? 34 : 0;
+    rect.setAttribute("width", w + 16 + pad); rect.setAttribute("x", -(w + 16 + pad) / 2);
+    if (img) { el("image", { href: img, x: -(w + 16 + pad) / 2 + 5, y: -14, width: 28, height: 28 }, g); t.setAttribute("x", pad / 2); }
     return new Promise((res, rej) => {
       const start = performance.now();
       const frame = now => {
@@ -445,6 +470,8 @@ class Scene {
 
 // ---------- shared moves ----------
 const U = "7f3a9c2e";
+const IMG = { castle: "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCABgAGADASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDXukyAy8kDg1Y09CYst+X0pUiyCpHFSW58u4SPHGDXVe6MbWZBqMYERYVhRqZEbceP5Guk1WMmIhRzzWBKDGMAd8nFa09jOpuVEQhxmtSzVV/DrWevzSDNdF4fshOxmmXECMob39qqo7K7Jhq7IcIBbqJZjzj7o/hH/wBeni9VJBKRz6CqmtXiy3Bji+bDHOB3rk7vXLiXxDDpWnCMspYTNL91nC58sHt7n1rCVox5pmqvKXLE7t9ekaVURK37Iy3UCyyDHJIrj/Dirqn2e4RSiOSCOpUg4IP0ru7VFij2D7oOKipyq3KXT5ne5fjQ7VLYPFPI+XB9aYJ0jXDMMDrVGe8LMqxEEsT+FY2uanLBMLnsaesQdw4HzVJMnGOx6UWBbz/LI4xW/QxKmqhlOcZBPNYkn7wcDNdF4mmi07Tpry6z5CgbsDnJIA/nXI6zq0Vs1vbadJFNNKQxKkHYnv789PrVxqRjG7IlCUpWRqWemqVE0z7EPcjp+FdPNayWulNaRSZZcjPTJ6tXnWo+KJbHRb5fJJuWRCsiH7qh1zx7gHpXZvqMN/t1GKQeXNGG5OAF789BjmpU/bS0ZTj7KOpnYht3luLgCKCEb5XfgADk5NeaaLOza/Y3kgy9xds7DB/jzx69wPwq7rWuXOuXVzEsu7So5sxoBjzsDhm9RnkDp0qHR4g2s2RcFgZlwOmKwxNRS0XQ2oQcdWd7p2ut4dkuY7iFjZzz+dHODuEbEAMCMcAkZzW/oviO21mxN3Yu7IJPLZWG0hh2/LH51zl1c28crROypIsHnHe2Ayg4JPbrVBdPvLE3k2iTRxCYZNuy7VJ24BHow59jXPRxCSUZ7G1Si3dxPRLm6BVxlQVGDg1Xt7pImEkoLvjhR0Hpmuf8LRyppItp5XnliIDPIcsvyj5c98HPWtiOIMenSu6HLKN0ckm1KxJdBo5DgblJ6elVrWUC7XLbeeauSxSH749sikWyjY5bGfUVSasS730OT+N95JB4d0+3hlZHubwA7DgsqqT/AD215z4asol1EK6DEuQzZOSCw6muu+N0r+boFnkNgSye+cqo/rXJ+Gwkdw000iRngb2bGCD+tclXqdNM2p9NFuuoW8sqqqxrkO27KlmwOOfuke9ZMbzXFklkZZBZ2zOFiDEeZnqW+vp/jUGp6hPd3X2kqSGAGN2SeSOtTaZE7Qzs5YRsSQpP9azjzRW5bs3sMgn33kcUUX7tict6kDtW3Ysq6jbphdplQBscjnmsW0jYvDLGVaJ1baAPmGDgZ9M1Z066aeSOafarLcbQAMbQCP8AOaTGjf8AFDwadrMN1eRRTQTWr27rITztIYEHqCQccUumXnnhrmzkeSMxbVtZZApJByNrdCccdjj1qLxHaz32o/ZpYxMv2mRIlY/JloztOfT39q42xguUitzZyv5xuCpVyNgB9/Ws4wUoK5cpWloew+ErsXD6jE0RiYFGy3G445z6EHijxD4r07wvGovXka4lBMcES5Zx069AM9zVP4K6mms+bb32GmhjYbD3XKkH6c4rnfjheWP/AAkFrYWa+ZLaxESsTwpYghfwx+tdlKpy0+XqjlqQ5ql+h6sxJ5jH1U05PMLf6kn6CrsaruyU/EVS8Q6pFpqWqYcSSTIVKkAYByc98YqnPlVyeW55B8ZLppvGmn2u3aLa0TJ9S7E/0FcWC4aLaudzHJx05rtfiVNHqHj+a4Qr5H2W3Acn7o27ufzrOg0RUskmaaOSNvmyvzFck849u9c860Iu7Zqo6GXMuIrIsnLMPmPbn0q7bhw7+UoK+ftIJ6DuaWezlSC1UKZBG6/OqnH3v5UlkC1xMGYjFxkAcc8UcyktCloXDFiZCFwmwICD05Ocfn+tVY7RbeCQh9xL7xkdM+w7VY+1tJcRJFbHy/M5km47noKDvZGWJQflPDDrSKOx1dQYdKnJYH7ZCSAcEblIOOtcNYW+LC4mDYFtfIGQjqCcfpt/Wus1x3Xw1ZXFrCzyo0Em1emFIyc/SuYmX7NBfrMsiG9dJYt38LBiTnHJHPpWNN2iaS3uM8G683hTWrm/XtayQqvAHmEjbn2yOa5q/uZL+8muXLzSSOWaRuNxzyTn86u6vGAtyVHySuZIz9Gzg+4zVHIGMj36V0p3Rg1qfUF1qVjZQozOoLEjMr7R615j4/1yO+1eDZ5KrDEpNwrg7wSTt/D+prkfEOs6z4jWF9SikE0MZSMBSgJJ6ntWHpOl6ndTtJKgykgXZK4BbHUDNYVKqlFpvQIxSaZ0usm31BbqcKFnlQAsOOAAOn0qxZT2UEdtE11CzBMrIgyGGT8pPqD6Cs65t7a5uGgN2YJZIfLZSnPB56/QijT7HRNPtpJVWS4miQ4WR9u8dTgVyycZU7O7Nb63RduYjaSqFuGBz0GTkcHP+e1V4PKSZ5o1d2LBjx909OlWLTUbG9Tz3tRHKcIpbn6cVTu9WtreZ4bdVyPvALjk9v8AD60oKaVraibvrc0kMbZ3RFOcDK/yqqEUSeWoJ+YHccnAx0Hp6UabrqO5hlYbicR5U5B7Z9j/AErO1W9aGS4/16shARVO0EckkjqKukqnM0N2tc7dNaEOj22nw27O4iCOSvUD+dcbqkM07S3sYlV921kKnDDpUv2lY7GPU7aSd45OXMcjEx8gHIPpx0qxPNfrPayRX+YpSH8peo4xkk9RnI7GqUJJ3G5KSsZdw2bBY7+1lRG6nlTnpkcVnXGmuqqbYPNGB8vPzDvjA611S3WqT/JJcWzxBjG6MQAWznHzDOcAn3rEvEczAmMQtknI+UD0x7fStIOcdzOSMm5152nbZIyhQVVh/OoY9XvJZFeKKV3BH3cnPPtXq8en6bbsDFZ2iuOmYVyP0qzHMBGBEo+XuFC5o9xbRGovueZ6jb3ep2Ed2mn3Qut+1iEcsw+lbCQXt5aT3EWn3H2pY9pSW3I3EEcYPfFdobl1cneox0BbrS/aJZMiLzJGxnIGPzqH8KXYrl1PNtSi1W1iihk0+bzJHDBwh6A56DvVR08+5caq0kCFxuATa4Pbr2FervMJj+/gDYGMyY6+1ZGo6JY6hEVuIoipbcdoO4fQ9cVpGouqE4djlZIbmxeKfSrgXkIiUcDacejepqxqNhb3UMcUE0Ks77SkrfOjFfl2t3Gex45rUXwjo6wAOkuTgB1lYY/pWnaWVvDBFGI2MduPk8xt7Jg55z/n8qHJdA5X1OR8P211p0sljeo6SBicL8wAdQCRjqcfyrWs9KuoV2OwkiA275Cu45J5H0649DW7OznIBCnpkHGfrxUBjIfC9cZ56Um2xpJGXZaKY43+1XZeUnJdEUE4GBnsf6HvVn+zrJBlog+3oGOQOc8DtU7SgHrz0BBqKaYBSW+X34xT1YaH/9k=", beagle: "data:image/jpeg;base64,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" };
+const pic = id => "AC".includes(id) ? IMG.castle : IMG.beagle;
 async function webPoll(s, key, n, { dy = 0, onEmpty } = {}) {
   for (let t = 0; t < n; t++) {
     await s.send(s.webR(dy - 6), s.redisL(dy - 6), `GET ${key}`, "cmd", 650);
@@ -467,30 +494,30 @@ const today = {
       run: async s => { for (let k = 0; k < 2; k++) { await s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 650); s.inc("cmds"); s.inc("empty"); await s.send(s.redisR(0), s.wL(0), "[ ]", "nil", 500); await s.wait(250); } } },
     { title: "Client uploads an image", cmd: "POST /predict   (castle_image.jpg)",
       text: "<code>simple_request.py</code> sends the photo to Flask's <code>/predict</code> route. The HTTP request stays open until the web server has an answer.",
-      run: async s => { await s.send(s.clientR(), s.webL(), "POST castle.jpg", "data"); s.status("client", "waiting…"); s.status("web", "got image"); } },
+      run: async s => { await s.send(s.clientR(), s.webL(), "POST castle.jpg", "data", 900, IMG.castle); s.nodeImg("web", IMG.castle); s.status("client", "waiting…"); s.status("web", "got image"); } },
     { title: "Web front door builds the JSON blob", cmd: `image → resize 224×224 → float32 array → base64\nk = str(uuid.uuid4())          # "${U}-…"\nd = {"id": k, "image": "AAAAPwAAgD8AAIA/…"}   # ≈800 KB of text`,
-      text: "The image becomes a NumPy array, then base64 text. A fresh UUID names this request; it becomes the key the answer will be written to.",
+      text: "The castle is shrunk to 224×224 (what ResNet50 expects), turned into a NumPy array, then base64 text. A fresh UUID names this request; the answer will later be written to a key with that name.",
       run: async s => { s.status("web", `k = ${U}…`); await s.wait(900); } },
     { title: "RPUSH the JSON onto the queue", cmd: `RPUSH image_queue '{"id": "${U}-…", "image": "AAAAPwAA…"}'`,
-      text: "The blob goes on the right end of the Redis list <code>image_queue</code>. The web server now knows which key to watch: <code>" + U + "-…</code>.",
-      run: async s => { await s.send(s.webR(), s.redisL(), "RPUSH {id, image}", "data"); s.inc("cmds"); s.queue.push({ id: U.slice(0, 3) }); s.setKey(U + "-…", null); s.status("web", "polling for result"); } },
+      text: "The whole blob, UUID <b>and</b> picture, becomes one item at the right end of the Redis list <code>image_queue</code>. The web server now knows which key to watch: <code>" + U + "-…</code>. That key doesn't exist yet.",
+      run: async s => { await s.send(s.webR(), s.redisL(), "RPUSH {id, image}", "data", 900, IMG.castle); s.inc("cmds"); s.nodeImg("web", null); s.queue.push({ id: U, img: IMG.castle, wide: true }); s.render(); s.status("web", "polling for result"); } },
     { title: "Web front door starts polling the key", cmd: `GET ${U}-…   →  (nil)\ntime.sleep(0.25)\nGET ${U}-…   →  (nil)`,
-      text: "The result key doesn't exist yet, so <code>GET</code> returns nothing. The web server sleeps and asks again, in a loop.",
+      text: "There is no key named <code>" + U + "-…</code> in Redis yet. <code>GET</code> on a key that doesn't exist returns nil. The web server sleeps and asks again, in a loop.",
       run: async s => { await webPoll(s, U, 2, { onEmpty: () => { s.inc("cmds"); s.inc("empty"); } }); } },
     { title: "Worker's next poll finds the job", cmd: "LRANGE image_queue 0 31   →  ['{\"id\": \"" + U + "-…\", …}']",
-      text: "<code>LRANGE</code> <b>reads</b> up to 32 items. It does not remove them; the job stays in the list (dashed outline).",
-      run: async s => { await s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 650); s.inc("cmds"); s.queue[0].state = "read"; s.render(); await s.send(s.redisR(0), s.wL(0), "[ {id, image} ]", "data"); s.status("w0", "decode + ResNet50…"); } },
+      text: "<code>LRANGE</code> <b>reads</b> up to 32 items and sends the worker a copy of the JSON: UUID plus picture. It does not remove anything; the original stays in the list (dashed outline).",
+      run: async s => { await s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 650); s.inc("cmds"); s.queue[0].state = "read"; s.render(); await s.send(s.redisR(0), s.wL(0), `[{id: ${U}…, image}]`, "data", 1000, IMG.castle); s.nodeImg("w0", IMG.castle); s.status("w0", "decode + ResNet50…"); } },
     { title: "Worker classifies; front door keeps asking", cmd: "model.predict(batch)          # worker, ~1–2 s\nGET " + U + "-…  →  (nil)   # web, every 0.25 s",
       text: "While the model runs, the web server's questions keep coming back empty. Each one is a round trip to Redis that does no useful work.",
       run: async s => { await webPoll(s, U, 3, { onEmpty: () => { s.inc("cmds"); s.inc("empty"); } }); } },
     { title: "Worker writes the answer to the key", cmd: `SET ${U}-… '[{"label": "…", "probability": …}, … top 5]'`,
-      text: "The worker stores the top-5 predictions as JSON under the same UUID the web server is watching.",
-      run: async s => { await s.send(s.wL(0), s.redisR(0), "SET " + U + " [preds]", "data"); s.inc("cmds"); s.setKey(U + "-…", "set"); s.status("w0", "trimming queue"); } },
+      text: "This <code>SET</code> is the moment the key <b>first exists</b>: the top-5 predictions, as JSON, under the UUID the web server keeps asking about. The picture isn't part of the answer; the worker throws its copy away.",
+      run: async s => { await s.send(s.wL(0), s.redisR(0), "SET " + U + " [preds]", "data"); s.inc("cmds"); s.setKey(U + "-…", "set"); s.nodeImg("w0", null); s.status("w0", "trimming queue"); } },
     { title: "Worker trims the queue", cmd: "LTRIM image_queue 1 -1      # drop the first len(imageIDs) items",
-      text: "Only now is the job removed, by <em>position</em>: \"drop the first 1 item.\" Remember this for the next animation.",
+      text: "Only now does the picture leave Redis. It's removed by <em>position</em>: \"drop the first 1 item.\" Remember this for the next animation.",
       run: async s => { await s.send(s.wL(0), s.redisR(0), "LTRIM 1 -1", "cmd", 650); s.inc("cmds"); s.queue[0].state = "gone"; s.render(); await s.wait(500); s.queue = []; s.render(); s.status("w0", "polling every 0.25 s"); } },
     { title: "Next poll finds it; key deleted", cmd: `GET ${U}-…   →  '[{"label": …}, …]'\nDEL ${U}-…`,
-      text: "Up to 0.25 s after the answer landed, the web server's next <code>GET</code> finally sees it. It deletes the key to keep Redis clean.",
+      text: "Up to 0.25 s after the answer landed, the web server's next <code>GET</code> finally sees it. It deletes the key, so Redis is back to holding nothing for this request.",
       run: async s => { await s.send(s.webR(-6), s.redisL(-6), `GET ${U}`, "cmd", 650); s.inc("cmds"); await s.send(s.redisL(6), s.webR(6), "[preds]", "data"); await s.send(s.webR(), s.redisL(), `DEL ${U}`, "cmd", 650); s.inc("cmds"); s.delKey(U + "-…"); } },
     { title: "Response goes back to the client", cmd: '{"success": true, "predictions": [ … top 5 … ]}',
       text: "The HTTP request that's been open this whole time finally returns. Look at the counter: most of the Redis commands found nothing.",
@@ -508,8 +535,8 @@ const workers = {
   steps: [
     { title: "Requests A and B are queued", cmd: "RPUSH image_queue '{\"id\": \"A\", …}'\nRPUSH image_queue '{\"id\": \"B\", …}'",
       text: "The web server pushes two jobs and starts polling keys A and B.",
-      run: async s => { await s.send(s.webR(), s.redisL(), "RPUSH A", "data", 700); s.queue.push({ id: "A" }); s.setKey("A", null); s.render();
-        await s.send(s.webR(), s.redisL(), "RPUSH B", "data", 700); s.queue.push({ id: "B" }); s.setKey("B", null); s.status("web", "polling A, B"); } },
+      run: async s => { await s.send(s.webR(), s.redisL(), "RPUSH A", "data", 700, pic("A")); s.queue.push({ id: "A", img: pic("A") }); s.render();
+        await s.send(s.webR(), s.redisL(), "RPUSH B", "data", 700, pic("B")); s.queue.push({ id: "B", img: pic("B") }); s.status("web", "polling A, B"); } },
     { title: "Both workers poll at the same moment", cmd: "Worker 1: LRANGE image_queue 0 31  →  [A, B]\nWorker 2: LRANGE image_queue 0 31  →  [A, B]",
       text: "<code>LRANGE</code> only reads, so both workers get the <b>same two jobs</b>. Nothing tells worker 2 that worker 1 already took them.",
       run: async s => { await Promise.all([s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 650), s.send(s.wL(1), s.redisR(1), "LRANGE 0 31", "cmd", 650)]);
@@ -518,7 +545,7 @@ const workers = {
         s.status("w0", "classifying A, B"); s.status("w1", "classifying A, B"); s.inc("dup", 2); } },
     { title: "Request C arrives while they work", cmd: "RPUSH image_queue '{\"id\": \"C\", …}'     →  queue: [A, B, C]",
       text: "Both workers are busy doing the same work twice. Meanwhile a third job lands at the end of the list.",
-      run: async s => { await s.send(s.webR(), s.redisL(), "RPUSH C", "data", 800); s.queue.push({ id: "C" }); s.setKey("C", null); s.status("web", "polling A, B, C"); } },
+      run: async s => { await s.send(s.webR(), s.redisL(), "RPUSH C", "data", 800, pic("C")); s.queue.push({ id: "C", img: pic("C") }); s.status("web", "polling A, B, C"); } },
     { title: "Worker 1 finishes and trims 2 items", cmd: "SET A '[…]'   SET B '[…]'\nLTRIM image_queue 2 -1      →  queue: [C]",
       text: "Worker 1 writes both answers and removes the first two positions. So far so good: A and B are gone, C is still waiting.",
       run: async s => { await s.send(s.wL(0), s.redisR(0), "SET A, SET B", "data"); s.setKey("A", "set"); s.setKey("B", "set");
@@ -531,8 +558,8 @@ const workers = {
       text: "Worker 2 rewrites A and B. Nobody is waiting for them anymore, so those keys sit in Redis forever. Then its <code>LTRIM 2 -1</code> removes two positions from a list that only holds C. <b>C is deleted without ever being classified.</b>",
       run: async s => { await s.send(s.wL(1), s.redisR(1), "SET A, SET B", "bad"); s.setKey("A", "orphan"); s.setKey("B", "orphan"); s.inc("orphan", 2);
         await s.send(s.wL(1), s.redisR(1), "LTRIM 2 -1", "bad", 650); s.queue[0].state = "gone"; s.render(); await s.wait(600); s.queue = []; s.render(); s.inc("lost"); s.status("w1", "polling"); } },
-    { title: "Request C never gets an answer", cmd: "GET C → (nil)\nGET C → (nil)\nGET C → (nil)   … forever",
-      text: "The web server polls key C forever, and the user's request hangs. This is the bug the project's README warns about: \"some requests never return while two workers are running.\"",
+    { title: "Request C never gets an answer", cmd: "GET C → (nil)    # key C will never exist\nGET C → (nil)\nGET C → (nil)   … forever",
+      text: "Key C will never be created, so the web server gets nil forever, and the user's request hangs. This is the bug the project's README warns about: \"some requests never return while two workers are running.\"",
       run: async s => { s.status("web", "C: waiting forever"); await webPoll(s, "C", 3); } },
     { title: "So the original design is stuck at one worker", cmd: "",
       text: "More workers means duplicate work, leaked keys and lost requests. The fix has to make <em>read</em> and <em>remove</em> a single step, so no two workers can ever get the same item. That's Animation 3.",
@@ -553,7 +580,7 @@ const polling = {
       run: async s => { for (let k = 0; k < 3; k++) { await s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 550); s.inc("lr"); await s.send(s.redisR(0), s.wL(0), "[ ]", "nil", 450); await s.wait(200); } } },
     { title: "Four requests arrive", cmd: "RPUSH image_queue A   RPUSH image_queue B\nRPUSH image_queue C   RPUSH image_queue D",
       text: "Four users upload images at about the same time.",
-      run: async s => { for (const id of "ABCD") { await s.send(s.webR(), s.redisL(), "RPUSH " + id, "data", 450); s.queue.push({ id }); s.setKey(id, null); } s.status("web", "4 requests waiting"); } },
+      run: async s => { for (const id of "ABCD") { await s.send(s.webR(), s.redisL(), "RPUSH " + id, "data", 450, pic(id)); s.queue.push({ id, img: pic(id) }); } s.status("web", "4 requests waiting"); } },
     { title: "The worker grabs all four as one batch", cmd: "LRANGE image_queue 0 31  →  [A, B, C, D]",
       text: "Batching is good: one model call classifies all four.",
       run: async s => { await s.send(s.wL(0), s.redisR(0), "LRANGE 0 31", "cmd", 600); s.queue.forEach(c => c.state = "read"); s.render(); await s.send(s.redisR(0), s.wL(0), "[A, B, C, D]", "data"); s.status("w0", "classifying 4 (~2 s)"); } },
@@ -561,7 +588,7 @@ const polling = {
       text: "Each request runs its own loop. Four waiting requests means 16 GETs a second, and every one of them is answered \"not yet.\"",
       run: async s => { const on = () => s.inc("gets"); await Promise.all(["A", "B", "C", "D"].map((id, k) => s.wait(k * 120).then(() => webPoll(s, id, 4, { dy: -54 + k * 36, onEmpty: on })))); } },
     { title: "Results land", cmd: "SET A '[…]'  SET B '[…]'  SET C '[…]'  SET D '[…]'\nLTRIM image_queue 4 -1",
-      text: "The answers are ready, but nobody knows yet. Each request finds out only at its next poll, up to 0.25 s later.",
+      text: "The result keys now exist, but nobody knows yet. Each request finds out only at its next poll, up to 0.25 s later.",
       run: async s => { await s.send(s.wL(0), s.redisR(0), "SET A B C D", "data"); for (const id of "ABCD") s.setKey(id, "set"); await s.send(s.wL(0), s.redisR(0), "LTRIM 4 -1", "cmd", 600); s.queue = []; s.render(); s.status("w0", "idle, polling"); } },
     { title: "Next polls find them", cmd: "GET A → '[…]'  GET B → '[…]'  GET C → '[…]'  GET D → '[…]'\nDEL A  DEL B  DEL C  DEL D",
       text: "Four useful answers. Look at how many GETs it took to get them.",
@@ -586,26 +613,26 @@ const fix = {
       run: async s => { await s.send(s.webR(), s.redisL(), "PSUBSCRIBE A, B, C", "notify"); s.sub = "listening on open connection"; s.render(); s.status("web", "listening"); } },
     { title: "Push the three jobs", cmd: "RPUSH image_queue '{\"id\": \"A\", …}'   (B, C the same)",
       text: "Same JSON blobs as before. After this the front door sends nothing; it just waits for a message.",
-      run: async s => { for (const id of "ABC") { await s.send(s.webR(-30), s.redisL(-30), "RPUSH " + id, "data", 500); s.queue.push({ id }); s.setKey(id, null); } } },
+      run: async s => { for (const id of "ABC") { await s.send(s.webR(-30), s.redisL(-30), "RPUSH " + id, "data", 500, pic(id)); s.queue.push({ id, img: pic(id) }); } } },
     { title: "Workers pop: read + remove in one step", cmd: "Worker 1: LPOP image_queue   →  A\nWorker 2: LPOP image_queue   →  B\nWorker 3: LPOP image_queue   →  C\n(batch version: LPOP image_queue 32)",
       text: "<code>LPOP</code> takes the item <b>and</b> removes it in one atomic command. Redis runs commands one at a time, so even if all three workers ask at the same instant, each gets a different item. No duplicates, nothing trimmed by mistake.",
       run: async s => { await Promise.all([0, 1, 2].map(i => s.send(s.wL(i), s.redisR(i), "LPOP", "cmd", 600)));
         const ids = s.queue.map(c => c.id); s.queue = []; s.render();
-        await Promise.all([0, 1, 2].map(i => s.send(s.redisR(i), s.wL(i), ids[i], "data", 700)));
-        ids.forEach((id, i) => s.status("w" + i, "classifying " + id)); } },
+        await Promise.all([0, 1, 2].map(i => s.send(s.redisR(i), s.wL(i), ids[i], "data", 700, pic(ids[i]))));
+        ids.forEach((id, i) => { s.status("w" + i, "classifying " + id); s.nodeImg("w" + i, pic(id)); }); } },
     { title: "Three workers, three times the throughput", cmd: "",
       text: "Each worker runs the model on its own job in parallel. Need more throughput? Start more workers.",
       run: async s => { await s.wait(1000); } },
     { title: "Worker 2 writes B; Redis notifies immediately", cmd: "SET B '[…]'\n→ Redis pushes:  pmessage  __keyspace@0__:B  \"set\"",
       text: "The moment the key is written, Redis sends <b>one</b> message down the open connection. No sleep, no up-to-0.25 s delay, no empty GETs.",
-      run: async s => { await s.send(s.wL(1), s.redisR(1), "SET B [preds]", "data"); s.setKey("B", "set"); s.status("w1", "polling queue");
+      run: async s => { await s.send(s.wL(1), s.redisR(1), "SET B [preds]", "data"); s.setKey("B", "set"); s.nodeImg("w1", null); s.status("w1", "polling queue");
         await s.send({ x: 490, y: 262 }, { x: 375, y: 262 }, "B: set", "notify", 700); s.inc("notes"); } },
     { title: "Front door fetches B once and replies", cmd: "GET B  →  '[…]'\nDEL B\nPUNSUBSCRIBE __keyspace@0__:B",
       text: "One GET, guaranteed to find the data, because the notification only comes after the SET.",
       run: async s => { await s.send(s.webR(-30), s.redisL(-30), "GET B", "cmd", 600); await s.send(s.redisL(-18), s.webR(-18), "[B preds]", "data", 600); s.delKey("B"); await s.send(s.webL(), s.clientR(), "200 B", "data", 700); } },
     { title: "A and C finish the same way", cmd: "SET A → notify A → GET A, DEL A\nSET C → notify C → GET C, DEL C",
       text: "One notification per result, delivered when it's ready.",
-      run: async s => { await Promise.all([s.send(s.wL(0), s.redisR(0), "SET A", "data"), s.send(s.wL(2), s.redisR(2), "SET C", "data")]); s.setKey("A", "set"); s.setKey("C", "set"); s.status("w0", "polling queue"); s.status("w2", "polling queue");
+      run: async s => { await Promise.all([s.send(s.wL(0), s.redisR(0), "SET A", "data"), s.send(s.wL(2), s.redisR(2), "SET C", "data")]); s.setKey("A", "set"); s.setKey("C", "set"); s.nodeImg("w0", null); s.nodeImg("w2", null); s.status("w0", "polling queue"); s.status("w2", "polling queue");
         await s.send({ x: 490, y: 262 }, { x: 375, y: 262 }, "A: set   C: set", "notify", 700); s.inc("notes", 2);
         await s.send(s.webR(-30), s.redisL(-30), "GET A, GET C", "cmd", 600); await s.send(s.redisL(-18), s.webR(-18), "[A] [C]", "data", 600); s.delKey("A"); s.delKey("C"); await s.send(s.webL(), s.clientR(), "200 A, 200 C", "data", 700); s.sub = null; s.render(); s.status("web", "idle"); } },
     { title: "Tally", cmd: "Per request, the front door sends:  PSUBSCRIBE, RPUSH, GET, DEL, PUNSUBSCRIBE\n…whether the model takes 0.1 s or 10 s.",
