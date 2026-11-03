@@ -1,5 +1,7 @@
 # Mongo Learning Plan
 
+> **Background reading:** [MongoDB in the Real World](RealWorldUses.md) — five companies using MongoDB in production, what for, and why.
+
 - [Step 1](Step1.ipynb)  (CRUD) (In Class - Together 15 min)
 
   - Using a sandbox environment create, read, update, delete documents. Query documents that other students are creating at the same time.
