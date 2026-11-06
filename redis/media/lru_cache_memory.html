@@ -1,0 +1,476 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!-- Published as a Claude artifact: https://claude.ai/artifact/Fd2nkNNq7eEpZyZa16DMzX -->
+<title>LRU Cache Memory Example</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Atkinson+Hyperlegible:wght@400;700&family=IBM+Plex+Mono:wght@400;600;700&display=swap">
+<style>
+/* Layout: control bar · one wide memory map (dictionary | memory grid with pointer arrows) · narration | what real Python did */
+:root{
+  --paper:#eaf0ee; --panel:#f8fbfa; --ink:#18282b; --muted:#5a6d70; --line:#c6d3d1; --grid:#dde6e4;
+  --byu:#2f7cf6; --cougar:#002e5d; --done:#23874a; --donewash:#a9e2b8; --evict:#7a5bb5; --active:#e08600;
+  --accent:#3552c8; --hl:#fff1b8; --other:#d9dfdd; --otherink:#6b7a7c; --garbage:#e7e2ee;
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Atkinson Hyperlegible",ui-sans-serif,system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#111a1c; --panel:#182427; --ink:#e3ecea; --muted:#90a3a5; --line:#2b3b3e; --grid:#172224;
+  --byu:#6eb0ff; --cougar:#7fb0ef; --done:#4cc38a; --donewash:#2c5a3f; --evict:#b49be8; --active:#ffb23e;
+  --accent:#8fa6ff; --hl:#3d3618; --other:#26333a; --otherink:#8a9a9c; --garbage:#2a2438; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --paper:#111a1c; --panel:#182427; --ink:#e3ecea; --muted:#90a3a5; --line:#2b3b3e; --grid:#172224;
+  --byu:#6eb0ff; --cougar:#7fb0ef; --done:#4cc38a; --donewash:#2c5a3f; --evict:#b49be8; --active:#ffb23e;
+  --accent:#8fa6ff; --hl:#3d3618; --other:#26333a; --otherink:#8a9a9c; --garbage:#2a2438; color-scheme:dark}
+
+html,body{background:var(--paper);color:var(--ink)}
+body{font-family:var(--f-body);font-size:15px;line-height:1.5;
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:28px 28px;background-position:-1px -1px;background-attachment:fixed}
+.wrap{max-width:1240px;margin:0 auto;padding-block:20px 40px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:16px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(22px,3vw,30px);line-height:1.1;margin:0 auto 0 0;letter-spacing:-.01em}
+h1 em{font-style:normal;color:var(--byu)}
+button{font:600 15px var(--f-body);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 16px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.primary{background:var(--accent);color:var(--panel);border-color:var(--accent);min-width:7.5em}
+.speed{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--muted)}
+.speed input{width:130px;accent-color:var(--accent)}
+.modes{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.modes .ml{font:600 11px var(--f-mono);text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-right:4px}
+.modes label{display:inline-flex;align-items:center;gap:6px;font-size:14px;border:1px solid var(--line);background:var(--panel);border-radius:20px;padding:5px 12px;cursor:pointer}
+.modes input{accent-color:var(--accent);margin:0}
+.modes label:has(input:checked){border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.modes label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+.pane{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0;display:flex;flex-direction:column;gap:10px}
+.label{font-family:var(--f-mono);font-size:11px;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0}
+.label .why{text-transform:none;letter-spacing:0;font-family:var(--f-body);font-size:13px;font-style:italic}
+.ticker{font:600 13px var(--f-mono);min-height:1.6em;overflow-wrap:anywhere}
+.ticker .hit{color:var(--done)} .ticker .miss{color:var(--evict)} .ticker .k{color:var(--active)} .ticker .gc{color:var(--evict)}
+.mapbox{overflow-x:auto}
+#map{display:block;width:100%;min-width:640px;height:auto}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:18px;height:0;border-top:2.5px solid;display:inline-block}
+.sb{width:14px;height:12px;border-radius:3px;display:inline-block;border:1.5px solid}
+.lower{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+@media (max-width:860px){.lower{grid-template-columns:minmax(0,1fr)}}
+.steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;counter-reset:st}
+.steps li{display:grid;grid-template-columns:24px 1fr;gap:8px;align-items:start;font-size:14px;color:var(--muted)}
+.steps li::before{counter-increment:st;content:counter(st);font:700 12px var(--f-mono);width:22px;height:22px;border-radius:50%;display:grid;place-items:center;border:1.5px solid var(--line);color:var(--muted)}
+.steps li.on{color:var(--ink)}
+.steps li.on::before{background:var(--active);border-color:var(--active);color:#1d1405}
+.steps li.past::before{border-color:var(--done);color:var(--done)}
+.steps code,.facts code{font:600 12.5px var(--f-mono)}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+@media (max-width:520px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat{display:flex;flex-direction:column;min-width:0}
+.stat .n{font:700 22px var(--f-display);line-height:1.1;font-variant-numeric:tabular-nums}
+.stat .t{font-size:12px;color:var(--muted)}
+.facts{margin:0;padding-left:1.1em;display:flex;flex-direction:column;gap:8px;font-size:14px;max-width:68ch}
+.facts b{font-weight:700}
+.note{font-size:12.5px;color:var(--muted);margin:0}
+
+/* svg */
+#map text{font-family:var(--f-mono)}
+#map .cap{font-size:10px;font-weight:700;letter-spacing:.08em;fill:var(--muted)}
+#map .drow rect{fill:var(--panel);stroke:var(--line);stroke-width:1}
+#map .drow.used rect{stroke:var(--byu)}
+#map .drow.look rect{stroke:var(--active);stroke-width:2;fill:color-mix(in srgb,var(--active) 12%,var(--panel))}
+#map .drow.miss rect{stroke:var(--evict);stroke-width:2;stroke-dasharray:4 3}
+#map .drow.newrow rect{fill:var(--donewash);stroke:var(--done);stroke-width:1.6}
+#map .drow .si{font-size:9.5px;fill:var(--muted)}
+#map .drow .dk{font-size:12px;font-weight:700;fill:var(--ink)}
+#map .drow .dv{font-size:11px;fill:var(--byu)}
+#map .drow .em{font-size:11px;fill:var(--muted);opacity:.6}
+#map .dline{fill:none;stroke:var(--byu);stroke-width:1.2;opacity:.45}
+#map .cell rect.b{fill:var(--panel);stroke:var(--line);stroke-width:1;stroke-dasharray:3 3}
+#map .cell .ad{font-size:9px;fill:var(--muted)}
+#map .cell .kl{font-size:10px;fill:var(--muted);text-anchor:middle;dominant-baseline:central}
+#map .cell.free rect.b{stroke:var(--muted);stroke-dasharray:5 3;stroke-width:1.3}
+#map .cell.other rect.b{fill:var(--other);stroke:var(--other);stroke-dasharray:none}
+#map .cell.other .kl{fill:var(--otherink);font-weight:600;font-size:11px}
+#map .cell.garbage rect.b{fill:var(--garbage);stroke:var(--evict);stroke-dasharray:3 2;stroke-width:1.3}
+#map .cell.garbage .key{fill:var(--evict);text-decoration:line-through}
+#map .cell.garbage .kl{fill:var(--evict)}
+#map .cell.node rect.b{fill:var(--panel);stroke:var(--cougar);stroke-width:1.8;stroke-dasharray:none}
+#map .cell .key{font-size:15px;font-weight:700;fill:var(--ink);text-anchor:middle;dominant-baseline:central;font-family:var(--f-body)}
+#map .cell .pf{font-size:10px;fill:var(--muted);dominant-baseline:central}
+#map .cell .pf.chg{fill:var(--active);font-weight:700}
+#map .cell .dot{fill:var(--cougar)}
+#map .cell .dot.pv{fill:var(--muted)}
+#map .cell.look rect.b{stroke:var(--active);stroke-width:3}
+#map .cell.fresh rect.b{fill:var(--donewash);stroke:var(--done);stroke-width:2.2}
+#map .cell.evicting rect.b{stroke:var(--evict);stroke-width:2.6;stroke-dasharray:5 3}
+#map .cell.grab rect.b{fill:var(--other);stroke:var(--active);stroke-width:2.4;stroke-dasharray:none}
+#map .cell.swept rect.b{stroke:var(--done);stroke-width:2.4}
+#map .cell text{paint-order:stroke;stroke:var(--panel);stroke-width:4px;stroke-linejoin:round}
+#map .cell.other text{stroke:var(--other)}
+#map .cell.garbage text{stroke:var(--garbage)}
+#map .cell.fresh text{stroke:var(--donewash)}
+#map.noprev .ptr.pv{display:none}
+#map .loop{fill:none;stroke:var(--evict);stroke-width:1.4}
+#map .ptr{fill:none;stroke-linecap:round}
+#map .ptr.nx{stroke:var(--cougar);stroke-width:2}
+#map .ptr.pv{stroke:var(--muted);stroke-width:1.4;stroke-dasharray:4 3}
+#map .ptr.hd{stroke:var(--done);stroke-width:2.4}
+#map .ptr.tl{stroke:var(--evict);stroke-width:2.4}
+#map .ptr.lk{stroke:var(--active);stroke-width:2.6}
+#map .ptr.moving{stroke:var(--active)!important;stroke-dasharray:none!important;stroke-width:2.6!important}
+#map .hbox rect{fill:var(--panel);stroke-width:1.6}
+#map .hbox text{font-size:11px;font-weight:700;dominant-baseline:central}
+#map .fl{font-size:10.5px;fill:var(--muted)}
+#map .fl .fv{fill:var(--ink);font-weight:600}
+#map .gcban rect{fill:var(--evict)}
+#map .gcban text{fill:#fff;font-size:12px;font-weight:700;text-anchor:middle;dominant-baseline:central}
+@media (prefers-reduced-motion:reduce){ #map *{transition:none!important} }
+</style>
+
+<div class="wrap">
+  <div class="bar">
+    <h1>LRU Cache <em>Memory</em> Example</h1>
+    <button id="b-play" class="primary">▶ Play</button>
+    <button id="b-step">One request</button>
+    <button id="b-reset">Reset</button>
+    <label class="speed" for="showprev"><input id="showprev" type="checkbox" checked style="accent-color:var(--accent)"> prev arrows</label>
+    <label class="speed" for="speed">Slow <input id="speed" type="range" min="0" max="100" value="20"> Fast</label>
+  </div>
+  <div class="modes" role="radiogroup" aria-label="What else the program is doing">
+    <span class="ml">The rest of the program</span>
+    <label><input type="radio" name="mode" value="quiet" checked> Quiet</label>
+    <label><input type="radio" name="mode" value="busy"> Busy making other objects</label>
+    <label><input type="radio" name="mode" value="cycle"> Leaves a reference cycle behind</label>
+  </div>
+
+  <section class="pane" aria-label="Memory map">
+    <p class="label">8-slot cache in memory <span class="why">(nodes never move; only the arrows change)</span></p>
+    <div class="ticker" id="ticker">Press Play or One request.</div>
+    <div class="mapbox"><svg id="map" viewBox="0 0 830 575" role="img" aria-label="Dictionary slots and a memory grid holding linked list nodes with pointer arrows"></svg></div>
+    <div class="legend">
+      <span><i class="sw" style="border-color:var(--cougar)"></i>next pointer</span>
+      <span><i class="sw" style="border-color:var(--muted);border-top-style:dashed"></i>prev pointer</span>
+      <span><i class="sw" style="border-color:var(--done)"></i>cache.head</span>
+      <span><i class="sw" style="border-color:var(--evict)"></i>cache.tail</span>
+      <span><i class="sw" style="border-color:var(--active)"></i>changing right now</span>
+      <span><i class="sb" style="background:var(--other);border-color:var(--other)"></i>someone else's object</span>
+      <span><i class="sb" style="border-color:var(--muted);border-style:dashed"></i>freed, ready to reuse</span>
+      <span><i class="sb" style="background:var(--garbage);border-color:var(--evict);border-style:dashed"></i>garbage, waiting for gc</span>
+    </div>
+  </section>
+
+  <div class="lower">
+    <section class="pane" aria-label="Step by step">
+      <p class="label">This request <span class="why">(step by step)</span></p>
+      <ol class="steps" id="steps"></ol>
+      <div class="stats">
+        <div class="stat"><span class="n" id="s-req">0</span><span class="t">requests</span></div>
+        <div class="stat"><span class="n" id="s-ev">0</span><span class="t">nodes thrown out</span></div>
+        <div class="stat"><span class="n" id="s-same">–</span><span class="t">new node reused that exact spot</span></div>
+        <div class="stat"><span class="n" id="s-addr">8</span><span class="t">different addresses used so far</span></div>
+      </div>
+    </section>
+    <section class="pane" aria-label="What real Python did">
+      <p class="label">What real Python did <span class="why">(CPython 3.13, measured with <code>id()</code>)</span></p>
+      <ul class="facts">
+        <li><b>Nothing slides around.</b> A node keeps the same address its whole life. Moving it to the front only rewires four or five pointers.</li>
+        <li><b>Quiet program:</b> a node is freed the instant nothing points to it, and Python's allocator hands out the most recently freed block first. The new node landed at the <b>exact</b> address of the node it replaced <b>90%</b> of the time (5 runs, about 250 evictions each).</li>
+        <li><b>Busy program:</b> when other same-size objects were created and kept in between, they took the freed spot first. Reuse dropped to <b>0%</b>, and the cache wandered over about 250 different addresses. Even the node's own data can do this: with <code>__slots__</code>, the value string was the same size as the node, and the two swapped places on every eviction.</li>
+        <li><b>Reference cycle:</b> a node stuck in a cycle isn't freed until the garbage collector runs. In one run the first collection came at request 1,157, after 481 evictions. Until then only 11% of new nodes reused an old address; right after it, 100% did.</li>
+      </ul>
+      <p class="note">Addresses here are shortened to their last three hex digits. All of them start with <code>0x7f3a2c4e1</code>. The grid is a cartoon of one memory pool: real blocks are 64 bytes apart, like these.</p>
+    </section>
+  </div>
+</div>
+
+<script>
+(function(){
+const $=id=>document.getElementById(id), NS='http://www.w3.org/2000/svg';
+const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)');
+const BASE=0x7f3a2c4e1000, COLS=6, ROWS=6, CAP=8, DSLOTS=16;
+const KEYS=['cat','dog','owl','fox','bee','elk','yak','ant','bat','cow','eel','emu','gnu','hen','pig','ram'];
+const OTHER=['str','list','dict','int','tuple','float','bytes','set'];
+const short=a=>'…'+(a&0xfff).toString(16).padStart(3,'0');
+const ord=n=>{ const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); };
+
+/* ---------- geometry ---------- */
+const DX=8, DW=176, DY0=62, DRH=28;
+const GX=262, GY=62, CW=86, CH=64, GAPX=10, GAPY=12;
+const cellRect=i=>({x:GX+(i%COLS)*(CW+GAPX), y:GY+Math.floor(i/COLS)*(CH+GAPY), w:CW, h:CH});
+const PROW=36, NROW=52;
+const HEADBOX={x:GX, y:12, w:104, h:26}, TAILBOX={x:GX+COLS*(CW+GAPX)-GAPX-104, y:12, w:104, h:26};
+
+/* ---------- model ---------- */
+let mode='quiet', cells, dict, head, tail, freeList, fresh, rq, stats, addrsUsed, gcCount;
+function hashSlot(k){ let h=2166136261; for(const c of k){ h^=c.charCodeAt(0); h=Math.imul(h,16777619)>>>0; } return h%DSLOTS; }
+function placeKey(k){ let s=hashSlot(k); while(dict[s]) s=(s+1)%DSLOTS; return s; }
+function reset(){
+  cells=Array.from({length:COLS*ROWS},(_,i)=>({i, addr:BASE+0x100+i*0x40, kind:'unused', node:null, label:''}));
+  dict=new Array(DSLOTS).fill(null); head=tail=null; freeList=[]; gcCount=0;
+  [10,13,15,20,23,27,30,34].forEach((c,j)=>{ cells[c].kind='other'; cells[c].label=OTHER[j]; });
+  const start=['cat','dog','owl','fox','bee','elk','yak','ant'];
+  let prev=null;
+  start.forEach((k,j)=>{ const n={key:k, cell:j, prev, next:null, slot:0, chP:-1, chN:-1}; cells[j].kind='node'; cells[j].node=n;
+    if(prev) prev.next=n; else head=n; prev=n; n.slot=placeKey(k); dict[n.slot]=n; });
+  tail=prev;
+  fresh=cells.map(c=>c.i).filter(i=>cells[i].kind==='unused');
+  addrsUsed=new Set(start.map((_,j)=>j)); rq=null;
+  stats={req:0, ev:0, same:0};
+  perm=[...KEYS]; reqN=0;
+  updateStats(); renderAll(); setSteps(null,-1);
+  $('ticker').textContent='Press Play or One request. Each request asks the cache for one key.';
+}
+let perm, reqN;
+function pickKey(){
+  reqN++; if(reqN%30===0){ const a=Math.floor(Math.random()*6), b=6+Math.floor(Math.random()*10); [perm[a],perm[b]]=[perm[b],perm[a]]; }
+  const w=perm.map((_,r)=>1/Math.pow(r+1,.45)), s=w.reduce((a,b)=>a+b); let u=Math.random()*s;
+  for(let r=0;r<w.length;r++){ u-=w[r]; if(u<=0) return perm[r]; } return perm[perm.length-1];
+}
+const nodes=()=>{ const o=[]; for(let n=head;n;n=n.next) o.push(n); return o; };
+const findNode=k=>dict.find(n=>n&&n.key===k)||null;
+const garbage=()=>cells.filter(c=>c.kind==='garbage');
+let phaseStamp=0;
+function setPtr(n, which, v){ n[which]=v; if(which==='next') n.chN=phaseStamp; else n.chP=phaseStamp; }
+
+/* ---------- one request as a list of phases ---------- */
+function planRequest(){
+  const key=pickKey(), n=findNode(key), list=nodes();
+  const r={key, hit:!!n, node:n, pos:n?list.indexOf(n):-1, phase:0, phases:[], hl:{}};
+  r.phases.push('lookup');
+  if(n){ if(r.pos>0) r.phases.push('unhook','front'); else r.phases.push('already'); }
+  else { r.phases.push('evict'); if(mode==='cycle' && garbage().length+1>=5) r.phases.push('gc'); r.phases.push('alloc','front'); }
+  return r;
+}
+function doPhase(r){
+  phaseStamp++;
+  const ph=r.phases[r.phase]; r.hl={};
+  if(ph==='lookup'){
+    if(r.hit){ r.hl.look=r.node.cell; r.hl.drow=r.node.slot; r.hl.dline=true; }
+    else { r.hl.miss=hashSlot(r.key); }
+  }
+  if(ph==='unhook'){
+    const n=r.node, a=n.prev, b=n.next;
+    if(a) setPtr(a,'next',b); else head=b;
+    if(b) setPtr(b,'prev',a); else tail=a;
+    setPtr(n,'prev',null); setPtr(n,'next',null);
+    r.hl.look=n.cell; r.hl.unhooked=n.cell; r.hl.ptrs=[a&&a.cell,b&&b.cell];
+    r.oldPrev=a; r.oldNext=b;
+  }
+  if(ph==='already'){ r.hl.look=r.node.cell; }
+  if(ph==='front'){
+    const n=r.node, oldHead=head;
+    setPtr(n,'next',oldHead); setPtr(n,'prev',null);
+    if(oldHead) setPtr(oldHead,'prev',n);
+    head=n; if(!tail) tail=n;
+    r.hl.look=n.cell; r.hl.newFront=true;
+  }
+  if(ph==='evict'){
+    const v=tail; r.victim=v; r.victimAddr=cells[v.cell].addr; r.victimCell=v.cell;
+    tail=v.prev; if(tail) setPtr(tail,'next',null); else head=null;
+    dict[v.slot]=null;
+    const c=cells[v.cell];
+    if(mode==='cycle'){ c.kind='garbage'; c.label=v.key; c.node=null; }
+    else { c.kind='free'; c.node=null; freeList.push(c.i); }
+    r.hl.evict=v.cell; r.hl.miss=v.slot;
+  }
+  if(ph==='gc'){
+    const g=garbage().sort((a,b)=>a.i-b.i);
+    g.forEach(c=>{ c.kind='free'; c.label=''; freeList.push(c.i); });
+    gcCount++; r.swept=g.map(c=>c.i); r.hl.swept=r.swept;
+  }
+  if(ph==='alloc'){
+    r.grabbed=[];
+    if(mode==='busy'){
+      // the rest of the program makes (and keeps) objects of the same size, and lets go of some old ones
+      const k=Math.random()<.75?1+(Math.random()<.35?1:0):0;
+      for(let j=0;j<k;j++){ const ci=takeBlock(); if(ci===null) break; cells[ci].kind='other'; cells[ci].label=OTHER[Math.floor(Math.random()*OTHER.length)]; r.grabbed.push(ci); }
+      const others=cells.filter(c=>c.kind==='other' && !r.grabbed.includes(c.i));
+      if(others.length>6 && Math.random()<.7){ const c=others[Math.floor(Math.random()*others.length)]; c.kind='free'; c.label=''; freeList.push(c.i); r.released=c.i; }
+    }
+    let ci=takeBlock();
+    if(ci===null){ const c=cells.find(c=>c.kind==='other'); c.kind='free'; freeList.push(c.i); ci=takeBlock(); }
+    const n={key:r.key, cell:ci, prev:null, next:null, slot:placeKey(r.key), chP:-1, chN:-1};
+    cells[ci].kind='node'; cells[ci].node=n; cells[ci].label=''; dict[n.slot]=n; r.node=n;
+    r.newAddr=cells[ci].addr; r.newCell=ci; addrsUsed.add(ci);
+    stats.ev++; if(r.newCell===r.victimCell) stats.same++;
+    r.hl.fresh=ci; r.hl.newrow=n.slot; r.hl.dline=true; r.hl.grab=r.grabbed;
+  }
+  renderAll(r); setSteps(r, r.phase);
+}
+function takeBlock(){ if(freeList.length) return freeList.pop(); if(fresh.length) return fresh.shift(); return null; }
+
+/* ---------- narration ---------- */
+function stepText(r, ph){
+  const n=r.node, A=c=>`<code>${short(cells[c].addr)}</code>`;
+  switch(ph){
+    case 'lookup': return r.hit ? `Look up <code>'${r.key}'</code> in the dictionary: slot ${n.slot} holds the node's address, ${A(n.cell)}. Jump straight there.` :
+                                  `Look up <code>'${r.key}'</code> in the dictionary. It isn't there, so this is a miss.`;
+    case 'already': return `It is already at the front. Nothing to rewire.`;
+    case 'unhook': return `Unhook it: its neighbors' <code>next</code> and <code>prev</code> now point past it. The node itself stays at ${A(n.cell)}.`;
+    case 'front': return `Hook it in at the front: change its <code>next</code>, the old head's <code>prev</code>, and <code>cache.head</code>. The node still hasn't moved.`;
+    case 'evict': return r.victim ? `The cache is full. Unhook the tail, <code>'${r.victim.key}'</code> at ${A(r.victimCell)}, and delete its dictionary entry. ${mode==='cycle' ? 'A leftover cycle keeps it alive as garbage.' : 'Nothing points to it now, so Python frees that block immediately.'}` : 'The cache is full. Unhook the tail and delete its dictionary entry.';
+    case 'gc': return `Too much garbage has piled up, so the garbage collector runs and frees ${r.swept?r.swept.length:'all the'} unreachable nodes at once.`;
+    case 'alloc': {
+      if(r.newCell===undefined) return `Make a new node for <code>'${r.key}'</code> somewhere in memory and add it to the dictionary.`;
+      const where = r.newCell===r.victimCell ? `the exact block the old node just gave back` :
+        (mode==='busy' && r.grabbed.length ? `a different block, because other code grabbed the freed one first` :
+        (mode==='cycle' ? `a block the old node never used, because the old one is still garbage` : `a different block`));
+      return `Make a new node for <code>'${r.key}'</code>. Python puts it at ${A(r.newCell)}: ${where}. Add it to the dictionary.`;
+    }
+  }
+}
+function setSteps(r, cur){
+  const ol=$('steps');
+  if(!r){ ol.innerHTML=['Look up the key in the dictionary.','Rewire pointers (or throw out the tail).','Hook a node in at the front.'].map(t=>`<li><span>${t}</span></li>`).join(''); return; }
+  ol.innerHTML=r.phases.map((p,i)=>`<li class="${i===cur?'on':i<cur?'past':''}"><span>${stepText(r,p)}</span></li>`).join('');
+}
+function setTicker(r){
+  const t=$('ticker');
+  t.innerHTML=`Request ${stats.req} · <span class="k">'${r.key}'</span> · `+(r.hit?`<span class="hit">hit</span> (${r.pos===0?'already at the front':ord(r.pos+1)+' in line'})`:`<span class="miss">miss</span>, throw out the least recently used node`)+
+    (mode==='cycle'?` · <span class="gc">${garbage().length} garbage node${garbage().length===1?'':'s'} waiting, ${gcCount} gc run${gcCount===1?'':'s'}</span>`:'');
+}
+function updateStats(){
+  $('s-req').textContent=stats.req; $('s-ev').textContent=stats.ev;
+  $('s-same').textContent=stats.ev?Math.round(100*stats.same/stats.ev)+'%':'–';
+  $('s-addr').textContent=addrsUsed.size;
+}
+
+/* ---------- drawing ---------- */
+const svg=$('map');
+svg.innerHTML=`<defs>
+ ${['nx','pv','hd','tl','lk','mv'].map(k=>`<marker id="m-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="${k==='pv'?7:9}" markerHeight="${k==='pv'?7:9}" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--${{nx:'cougar',pv:'muted',hd:'done',tl:'evict',lk:'active',mv:'active'}[k]})"/></marker>`).join('')}
+ </defs>
+ <text class="cap" x="${DX}" y="30">DICTIONARY</text><text class="cap" x="${DX}" y="44" style="font-weight:400;letter-spacing:0">16 slots · key → node address</text>
+ <g id="dlines"></g><g id="drows"></g><g id="cellsG"></g><g id="hboxes"></g><g id="ptrs"></g><g id="fx"></g><g id="flist"></g>`;
+const G=id=>svg.querySelector('#'+id);
+function renderAll(r){
+  const hl=(r&&r.hl)||{};
+  // dictionary rows
+  let h='';
+  for(let s=0;s<DSLOTS;s++){
+    const y=DY0+s*DRH, n=dict[s];
+    let cls='drow'+(n?' used':'')+(hl.drow===s&&n?' look':'')+(hl.newrow===s?' newrow':'')+(hl.miss===s?' miss':'');
+    h+=`<g class="${cls}"><rect x="${DX}" y="${y}" width="${DW}" height="${DRH-5}" rx="4"/><text class="si" x="${DX+6}" y="${y+12}">${s}</text>`+
+      (n?`<text class="dk" x="${DX+26}" y="${y+13}">'${n.key}'</text><text class="dv" x="${DX+DW-8}" y="${y+13}" text-anchor="end">→ ${short(cells[n.cell].addr)}</text>`
+        :`<text class="em" x="${DX+26}" y="${y+13}">${hl.miss===s && r && !r.hit && r.phases[r.phase]==='lookup' ? `'${r.key}'? not here` : 'empty'}</text>`)+`</g>`;
+  }
+  G('drows').innerHTML=h;
+  // dictionary lines (fixed for a node's whole life)
+  let dl='';
+  dict.forEach((n,s)=>{ if(!n) return; const p0={x:DX+DW, y:DY0+s*DRH+(DRH-5)/2}, R=cellRect(n.cell), e=edge(R,{x:R.x-40,y:R.y+R.h/2});
+    const bright = (hl.dline && ((hl.drow===s)||(hl.newrow===s)));
+    dl+=`<path class="dline" style="${bright?`stroke:var(--${hl.newrow===s?'done':'active'});stroke-width:2.4;opacity:1`:''}" d="M${p0.x},${p0.y} C${p0.x+50},${p0.y} ${e.x-50},${e.y} ${e.x},${e.y}" marker-end="${bright?`url(#m-${hl.newrow===s?'hd':'lk'})`:''}"/>`; });
+  G('dlines').innerHTML=dl;
+  // memory cells
+  let c='';
+  cells.forEach(cl=>{
+    const R=cellRect(cl.i);
+    let cls='cell '+cl.kind;
+    if(hl.look===cl.i) cls+=' look'; if(hl.fresh===cl.i) cls+=' fresh'; if(hl.evict===cl.i) cls+=' evicting';
+    if(hl.grab && hl.grab.includes(cl.i)) cls+=' grab'; if(hl.swept && hl.swept.includes(cl.i)) cls+=' swept';
+    c+=`<g class="${cls}"><rect class="b" x="${R.x}" y="${R.y}" width="${R.w}" height="${R.h}" rx="6"/><text class="ad" x="${R.x+6}" y="${R.y+12}">${short(cl.addr)}</text>`;
+    if(cl.kind==='node'){
+      const n=cl.node, pv=n.prev?short(cells[n.prev.cell].addr):'None', nx=n.next?short(cells[n.next.cell].addr):'None';
+      c+=`<text class="key" x="${R.x+R.w-8}" y="${R.y+14}" style="text-anchor:end">${n.key}</text>`+
+        `<text class="pf${n.chP===phaseStamp?' chg':''}" x="${R.x+6}" y="${R.y+PROW}">prev ${pv}</text><circle class="dot pv" cx="${R.x+R.w-8}" cy="${R.y+PROW}" r="2.6"/>`+
+        `<text class="pf${n.chN===phaseStamp?' chg':''}" x="${R.x+6}" y="${R.y+NROW}">next ${nx}</text><circle class="dot" cx="${R.x+R.w-8}" cy="${R.y+NROW}" r="2.6"/>`;
+    } else if(cl.kind==='other') c+=`<text class="kl" x="${R.x+R.w/2}" y="${R.y+R.h*.56}">${cl.label}</text>`;
+    else if(cl.kind==='free') c+=`<text class="kl" x="${R.x+R.w/2}" y="${R.y+R.h*.56}">free</text>`;
+    else if(cl.kind==='garbage') c+=`<text class="key" x="${R.x+R.w-8}" y="${R.y+14}" style="text-anchor:end">${cl.label}</text><text class="kl" x="${R.x+R.w/2}" y="${R.y+R.h*.6}">garbage</text>`+
+      `<path class="loop" d="M${R.x+R.w-30},${R.y+R.h-8} c-14,2 -14,-14 -2,-14" marker-end="url(#m-tl)"/>`;
+    c+=`</g>`;
+  });
+  G('cellsG').innerHTML=c;
+  // head / tail boxes
+  G('hboxes').innerHTML=`<g class="hbox"><rect x="${HEADBOX.x}" y="${HEADBOX.y}" width="${HEADBOX.w}" height="${HEADBOX.h}" rx="5" style="stroke:var(--done)"/><text x="${HEADBOX.x+8}" y="${HEADBOX.y+13}" style="fill:var(--done)">cache.head</text></g>`+
+    `<g class="hbox"><rect x="${TAILBOX.x}" y="${TAILBOX.y}" width="${TAILBOX.w}" height="${TAILBOX.h}" rx="5" style="stroke:var(--evict)"/><text x="${TAILBOX.x+8}" y="${TAILBOX.y+13}" style="fill:var(--evict)">cache.tail</text></g>`;
+  // free list
+  const fy=GY+ROWS*(CH+GAPY)+8;
+  G('flist').innerHTML=`<text class="fl" x="${GX}" y="${fy}">free list (last freed comes out first): <tspan class="fv">${freeList.length?[...freeList].reverse().map(i=>short(cells[i].addr)).join('  '):'empty, so new nodes use fresh memory'}</tspan></text>`+
+    (mode==='cycle'?`<text class="fl" x="${GX}" y="${fy+17}">garbage waiting for gc: <tspan class="fv">${garbage().map(c=>short(c.addr)).join('  ')||'none'}</tspan></text>`:'');
+  targets(r);
+}
+function edge(R,from){
+  const cx=R.x+R.w/2, cy=R.y+R.h/2, dx=from.x-cx, dy=from.y-cy;
+  if(!dx&&!dy) return {x:cx,y:R.y};
+  const t=Math.min((R.w/2+2)/Math.abs(dx||1e-9),(R.h/2+2)/Math.abs(dy||1e-9));
+  return {x:cx+dx*t, y:cy+dy*t};
+}
+
+/* pointer arrows: each one tweens its end when its target changes */
+const P=new Map();
+function targets(r){
+  const want=new Map();
+  for(let n=head;n;n=n.next){
+    const R=cellRect(n.cell);
+    want.set('n'+n.cell+n.key,{start:{x:R.x+R.w-8,y:R.y+NROW}, to:n.next?n.next.cell:null, cls:'nx', bow:1, src:n.cell});
+    want.set('p'+n.cell+n.key,{start:{x:R.x+R.w-8,y:R.y+PROW}, to:n.prev?n.prev.cell:null, cls:'pv', bow:-1, src:n.cell});
+  }
+  // the unhooked node's pointers (cleared) still need to animate away: it's not in the chain during "unhook"
+  if(r && r.phases[r.phase]==='unhook'){ const n=r.node, R=cellRect(n.cell);
+    want.set('n'+n.cell+n.key,{start:{x:R.x+R.w-8,y:R.y+NROW}, to:null, cls:'nx', bow:1, src:n.cell});
+    want.set('p'+n.cell+n.key,{start:{x:R.x+R.w-8,y:R.y+PROW}, to:null, cls:'pv', bow:-1, src:n.cell}); }
+  want.set('H',{start:{x:HEADBOX.x+HEADBOX.w/2,y:HEADBOX.y+HEADBOX.h}, to:head?head.cell:null, cls:'hd', bow:.6});
+  want.set('T',{start:{x:TAILBOX.x+TAILBOX.w/2,y:TAILBOX.y+TAILBOX.h}, to:tail?tail.cell:null, cls:'tl', bow:-.6});
+  const now=performance.now(), dur=reduceMotion.matches?0:Math.min(650, phaseMs()*.7);
+  want.forEach((w,id)=>{
+    const anchor = w.to===null ? {...w.start} : centerOf(w.to);
+    let p=P.get(id);
+    if(!p){ p={id, el:document.createElementNS(NS,'path'), cur: w.to===null?{...w.start}:anchor, from:null, to:anchor, t0:now, dur:0, alpha:0, gone:false}; G('ptrs').appendChild(p.el); P.set(id,p);
+      if(w.to!==null){ p.from={...w.start}; p.t0=now; p.dur=dur; } }
+    const changed = p.to.x!==anchor.x || p.to.y!==anchor.y;
+    if(changed){ p.from={...p.cur}; p.to=anchor; p.t0=now; p.dur=dur; }
+    Object.assign(p,{start:w.start, cls:w.cls, bow:w.bow, isNull:w.to===null, gone:false, tcell:w.to});
+  });
+  P.forEach((p,id)=>{ if(!want.has(id) && !p.gone){ p.gone=true; p.from={...p.cur}; p.to={...p.start}; p.t0=now; p.dur=dur; p.isNull=true; } });
+}
+const centerOf=ci=>{ const R=cellRect(ci); return {x:R.x+R.w/2, y:R.y+R.h/2}; };
+function drawPtrs(now){
+  P.forEach((p,id)=>{
+    const k=p.dur?Math.min(1,(now-p.t0)/p.dur):1, e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
+    p.cur={x:p.from?p.from.x+(p.to.x-p.from.x)*e:p.to.x, y:p.from?p.from.y+(p.to.y-p.from.y)*e:p.to.y};
+    const S=p.start, A=p.cur, dx=A.x-S.x, dy=A.y-S.y, L=Math.hypot(dx,dy);
+    const moving=k<1;
+    if(L<6){ p.el.setAttribute('d',''); if(p.gone && k>=1){ p.el.remove(); P.delete(id); } return; }
+    const mx=(S.x+A.x)/2, my=(S.y+A.y)/2, nx=-dy/L, ny=dx/L, b=Math.min(60,L*.22)*p.bow;
+    const C={x:mx+nx*b, y:my+ny*b};
+    let E=A;
+    if(!p.isNull || moving){ const tc=p.tcell; if(tc!==null && tc!==undefined && !moving){ E=edge(cellRect(tc),C); } }
+    if(!p.isNull && !moving && p.tcell!==null){ E=edge(cellRect(p.tcell),C); }
+    p.el.setAttribute('d',`M${S.x},${S.y} Q${C.x},${C.y} ${E.x},${E.y}`);
+    p.el.setAttribute('class','ptr '+p.cls+(moving?' moving':''));
+    p.el.setAttribute('marker-end', p.isNull && !moving ? '' : `url(#m-${moving?'mv':p.cls})`);
+  });
+}
+
+/* ---------- timing & loop ---------- */
+const phaseMs=()=>Math.round(1500*Math.pow(.06,(+$('speed').value)/100));
+let playing=false, stepOnce=false, nextAt=0;
+function tick(now){
+  if((playing||stepOnce||rq) && now>=nextAt){
+    if(!rq){ if(playing||stepOnce){ rq=planRequest(); stats.req++; setTicker(rq); doPhase(rq); } }
+    else { rq.phase++; if(rq.phase<rq.phases.length) doPhase(rq); else { updateStats(); setSteps(rq, rq.phases.length); const done=rq; rq=null; renderAll(null); setTicker(done); if(stepOnce){ stepOnce=false; } } }
+    nextAt=now+phaseMs();
+  }
+  drawPtrs(now);
+  requestAnimationFrame(tick);
+}
+function setPlaying(p){ playing=p; $('b-play').textContent=p?'❚❚ Pause':'▶ Play'; }
+$('b-play').onclick=()=>{ setPlaying(!playing); stepOnce=false; };
+$('b-step').onclick=()=>{ setPlaying(false); if(!rq) { stepOnce=true; nextAt=0; } };
+$('b-reset').onclick=()=>{ setPlaying(false); stepOnce=false; P.forEach(p=>p.el.remove()); P.clear(); reset(); };
+document.querySelectorAll('input[name=mode]').forEach(i=>i.addEventListener('change',()=>{
+  mode=i.value;
+  if(mode!=='cycle' && garbage().length){ garbage().forEach(c=>{ c.kind='free'; c.label=''; freeList.push(c.i); }); }
+  if(!rq) renderAll(null);
+}));
+$('showprev').addEventListener('change',e=>svg.classList.toggle('noprev',!e.target.checked));
+document.addEventListener('keydown',e=>{ if(e.key===' ' && e.target===document.body){ e.preventDefault(); $('b-play').click(); } });
+reset();
+requestAnimationFrame(tick);
+})();
+</script>
+
+</body></html>

@@ -1,0 +1,10 @@
+# Redis animations
+
+Open these through GitHub Pages so the animations run:
+
+| Page | What it shows |
+|---|---|
+| [Polling vs. Notifications](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/polling_vs_notifications.html) | The work queue project step by step: polling, the second-worker bug, notifications + atomic pop, scaling |
+| [Pooling Redis Subscribers](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/subscriber_pooling.html) | One subscriber connection per request vs. one per process, how the pool routes answers, Redis and OS connection limits (Linux, Windows, macOS) |
+| [LRU Cache Example](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/lru_cache.html) | A dictionary + doubly linked list LRU cache, and why it beats a plain list |
+| [LRU Cache Memory Example](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/lru_cache_memory.html) | The same cache in memory: nodes never move, only pointers change; what CPython's allocator and gc do |
