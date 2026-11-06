@@ -167,6 +167,8 @@ p.close()
 	- Come up with your own approach!
 - Pick one that is most interesting to you and implement it. Describe how it works and any interesting features it has!
 
+<sub>FYI: a Redis list is fine here, but production systems keep logs elsewhere. See [where logs live in production](https://byu-cs-452.github.io/byu-cs-452-class-content/system_design/production_logging.html).</sub>
+
 ---
 
 ## Going Further: Reliable Queues
@@ -176,3 +178,7 @@ The `LPOP` fix for Deliverable 4 ensures each item is processed once, but if a w
 - **`BRPOPLPUSH` / `LMOVE`**: Atomically pops an item from one list and pushes it to a "processing" list. If the worker completes successfully, it removes the item from the processing list. If the worker crashes, a monitor process can detect stuck items in the processing list and re-queue them.
 
 This is called a *two-phase commit* pattern: claim → process → acknowledge. It's how production systems like Sidekiq and Celery handle job reliability.
+
+See it work:
+- [Reliable Redis Queue](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/reliable_queue.html): an animation of claim, crash, reaper and a dead-letter list.
+- [reliable_queue_example](../reliable_queue_example/): a small runnable version with a worker that crashes on purpose and a reaper that puts abandoned jobs back in the queue.

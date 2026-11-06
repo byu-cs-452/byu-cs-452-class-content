@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reliable Redis Queue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: header · step-through animation (diagram, caption + steps) · the code · Redis Streams mapping · questions */
+:root {
+  --bg: #f2f3f6; --surface: #ffffff; --ink: #161a22; --muted: #5a6373; --line: #d3d8e1;
+  --redis: #c8312a; --redis-bg: #fbeceb;
+  --data: #1f63c4; --data-bg: #e7effb;
+  --good: #0d7a50; --good-bg: #e1f4eb;
+  --bad: #b42318; --bad-bg: #fdeceb;
+  --warn: #a15c00; --warn-bg: #fdf1dc;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+    --redis: #f0605a; --redis-bg: #2c1716; --data: #74a9ff; --data-bg: #17253b;
+    --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+    --warn: #f0b04a; --warn-bg: #2e2412; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+  --redis: #f0605a; --redis-bg: #2c1716; --data: #74a9ff; --data-bg: #17253b;
+  --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+  --warn: #f0b04a; --warn-bg: #2e2412; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 17px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
+h1, h2, h3 { font-family: var(--f-display); letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(30px, 4.4vw, 48px); font-weight: 800; line-height: 1.05; }
+h1 .r { color: var(--redis); }
+h2 { font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; }
+h3 { font-size: 19px; font-weight: 600; }
+p { margin: 0; max-width: 74ch; }
+a { color: var(--data); }
+code, pre { font-family: var(--f-mono); font-size: 0.86em; }
+.credit { color: var(--muted); font-size: 13px; font-style: italic; }
+header.top { display: grid; gap: 12px; }
+section.stage { margin-top: 44px; display: grid; gap: 14px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--redis); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.diagram { overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 720px; height: auto; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.controls button, .controls select { font: inherit; font-size: 15px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.controls button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 700; }
+.controls button:disabled { opacity: .45; cursor: default; }
+.controls button:focus-visible, .controls select:focus-visible { outline: 2px solid var(--redis); outline-offset: 2px; }
+.clock { margin-left: auto; font-family: var(--f-mono); font-size: 14px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-variant-numeric: tabular-nums; }
+.two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.two.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 860px) { .two, .two.even { grid-template-columns: minmax(0, 1fr); } }
+.caption { padding: 14px 16px; display: grid; gap: 8px; min-width: 0; }
+.caption .stepno { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+pre { margin: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; line-height: 1.45; }
+pre:empty { display: none; }
+pre .c { color: var(--muted); }
+ol.steps { margin: 0; padding: 14px 14px 14px 38px; display: grid; gap: 3px; font-size: 15px; color: var(--muted); }
+ol.steps li { padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+ol.steps li.done { color: var(--ink); }
+ol.steps li.now { color: var(--ink); background: var(--redis-bg); font-weight: 700; }
+.codebox { padding: 12px 14px; display: grid; gap: 8px; min-width: 0; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--f-display); font-weight: 600; background: var(--bg); }
+tr:last-child td { border-bottom: 0; }
+.note { font-size: 15px; color: var(--muted); }
+ol.plain { margin: 0; padding: 16px 16px 16px 40px; display: grid; gap: 6px; }
+
+/* SVG */
+svg text { font-family: var(--f-body); }
+.box { fill: var(--surface); stroke: var(--line); stroke-width: 2; }
+.box.redis { fill: var(--redis-bg); stroke: var(--redis); }
+.box.crashed { fill: var(--bad-bg); stroke: var(--bad); }
+.box.busy { stroke: var(--data); }
+.box.reaper { stroke: var(--warn); }
+.box.reaper.on { fill: var(--warn-bg); }
+.t { font-family: var(--f-display); font-weight: 600; font-size: 17px; fill: var(--ink); }
+.t.redis { fill: var(--redis); }
+.s { font-family: var(--f-mono); font-size: 11.5px; fill: var(--muted); }
+.st { font-family: var(--f-mono); font-size: 12.5px; fill: var(--data); }
+.st.bad { fill: var(--bad); font-weight: 600; }
+.st.good { fill: var(--good); }
+.lane { fill: var(--surface); stroke: var(--line); stroke-dasharray: 4 3; }
+.chip rect { fill: var(--data-bg); stroke: var(--data); stroke-width: 1.8; }
+.chip text { font-family: var(--f-display); font-weight: 800; font-size: 18px; fill: var(--data); text-anchor: middle; dominant-baseline: central; }
+.chip.hot rect { stroke: var(--warn); stroke-width: 3; fill: var(--warn-bg); }
+.chip.hot text { fill: var(--warn); }
+.chip.ok rect { fill: var(--good-bg); stroke: var(--good); } .chip.ok text { fill: var(--good); }
+.chip.dead rect { fill: var(--bad-bg); stroke: var(--bad); } .chip.dead text { fill: var(--bad); }
+.row rect { fill: var(--surface); stroke: var(--line); }
+.row.old rect { fill: var(--warn-bg); stroke: var(--warn); stroke-width: 2; }
+.row text { font-family: var(--f-mono); font-size: 12px; fill: var(--ink); dominant-baseline: central; }
+.row.old text.age { fill: var(--warn); font-weight: 600; }
+g.pkt rect { stroke-width: 1.5; }
+g.pkt text { font-family: var(--f-mono); font-size: 12px; dominant-baseline: central; text-anchor: middle; }
+g.pkt.cmd rect { fill: var(--surface); stroke: var(--ink); } g.pkt.cmd text { fill: var(--ink); }
+g.pkt.data rect { fill: var(--data-bg); stroke: var(--data); } g.pkt.data text { fill: var(--data); font-weight: 600; }
+g.pkt.warn rect { fill: var(--warn-bg); stroke: var(--warn); } g.pkt.warn text { fill: var(--warn); font-weight: 600; }
+.bang { font-family: var(--f-display); font-weight: 800; font-size: 26px; fill: var(--bad); }
+.ghost { font-family: var(--f-mono); font-size: 12px; fill: var(--bad); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">CS 452 · Redis Work Queue Project · Going further</div>
+  <h1>Reliable Queues: <span class="r">claim, work, acknowledge</span></h1>
+  <p>With <code>LPOP</code>, a job leaves Redis the moment a worker takes it. If that worker crashes, the job is gone: nobody has it and nobody will ever answer. A reliable queue never lets a job be "in the air." <code>LMOVE</code> moves it from the queue to a <b>processing</b> list in one atomic step. The worker removes it only after the result is saved. A separate <b>reaper</b> process watches the processing list and puts abandoned jobs back in line.</p>
+  <p class="credit">[Page created using Claude by Professor Reynolds]</p>
+</header>
+
+<section class="stage">
+  <div class="eyebrow">Animation · two workers, one crash, one poison job</div>
+  <div class="controls">
+    <button type="button" class="primary" id="b-play">Play</button>
+    <button type="button" id="b-back">◀ Back</button>
+    <button type="button" id="b-next">Next ▶</button>
+    <button type="button" id="b-reset">Restart</button>
+    <select id="b-speed" aria-label="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
+    <span class="clock" id="clock">t = 0 s</span>
+  </div>
+  <div class="panel diagram"><svg id="sv" viewBox="0 0 1100 470" role="img" aria-label="Redis queue, processing list and claims hash, with two workers and a reaper process"></svg></div>
+  <div class="two">
+    <div class="panel caption" aria-live="polite"><div class="stepno" id="c-no"></div><h3 id="c-title"></h3><pre id="c-cmd"></pre><p id="c-text"></p></div>
+    <ol class="panel steps" id="steps"></ol>
+  </div>
+</section>
+
+<section class="stage">
+  <div class="eyebrow">The code</div>
+  <h2>Three small functions and a reaper</h2>
+  <p>Runnable version with a worker that crashes on purpose: <a href="https://github.com/byu-cs-452/byu-cs-452-class-content/tree/main/redis/reliable_queue_example" target="_blank">redis/reliable_queue_example</a>. Start the reaper, two or three workers and the producer in separate terminals, and watch every job finish even as workers die.</p>
+  <div class="two even">
+    <div class="panel codebox">
+<pre><span class="c"># worker: claim -> work -> save -> acknowledge</span>
+job = r.blmove("jobs:queue", "jobs:processing",
+               5, "LEFT", "RIGHT")      <span class="c"># atomic</span>
+r.hset("jobs:claims", job_id,
+       json.dumps({"worker": me, "at": time.time()}))
+r.hincrby("jobs:attempts", job_id, 1)
+
+result = do_the_work(job)               <span class="c"># call heartbeat()</span>
+                                        <span class="c"># if it's slow</span>
+r.set(f"result:{job_id}", result)       <span class="c"># save FIRST</span>
+with r.pipeline() as p:                 <span class="c"># then ack</span>
+    p.lrem("jobs:processing", 1, job)
+    p.hdel("jobs:claims", job_id)
+    p.hdel("jobs:attempts", job_id)
+    p.execute()</pre>
+    </div>
+    <div class="panel codebox">
+<pre><span class="c"># reaper: every few seconds</span>
+for job in r.lrange("jobs:processing", 0, -1):
+    claim = r.hget("jobs:claims", id_of(job))
+    if claim is None:          <span class="c"># died before HSET:</span>
+        r.hsetnx(...now...)    <span class="c"># start the clock</span>
+    elif now - claim["at"] &gt; LEASE_SECONDS:
+        requeue(job)           <span class="c"># Lua script below</span>
+
+<span class="c">-- requeue, run atomically inside Redis</span>
+if redis.call('LREM', processing, 1, job) == 0
+  then return 0 end            <span class="c">-- already acked</span>
+redis.call('HDEL', claims, id)
+if attempts &gt;= MAX then
+  redis.call('RPUSH', dead, job)   <span class="c">-- give up</span>
+else
+  redis.call('LPUSH', queue, job)  <span class="c">-- front of line</span>
+end</pre>
+    </div>
+  </div>
+  <p class="note">The order matters: <b>save the result, then acknowledge.</b> If the worker dies between the two, the job runs again, which is fine because writing <code>result:&lt;id&gt;</code> twice gives the same answer. The other order could acknowledge a job whose result was never saved. This gives <b>at-least-once</b> delivery: every job is finished, and a few might be done twice. That's the guarantee Sidekiq, Celery and Amazon SQS give too.</p>
+</section>
+
+<section class="stage">
+  <div class="eyebrow">Built into Redis</div>
+  <h2>Redis Streams do this for you</h2>
+  <p>Redis 5 added <b>Streams</b> with <b>consumer groups</b>, which keep the same bookkeeping inside Redis. Every piece we built has a Streams command:</p>
+  <div class="panel tablewrap">
+    <table>
+      <thead><tr><th>What we built with lists</th><th>Redis Streams</th></tr></thead>
+      <tbody>
+        <tr><td><code>RPUSH jobs:queue</code></td><td><code>XADD jobs * image ...</code></td></tr>
+        <tr><td><code>BLMOVE</code> to <code>jobs:processing</code> + <code>HSET jobs:claims</code></td><td><code>XREADGROUP GROUP workers w1 BLOCK 5000 STREAMS jobs &gt;</code>. Redis records who has each message in the Pending Entries List.</td></tr>
+        <tr><td><code>LREM</code> + <code>HDEL</code> (acknowledge)</td><td><code>XACK jobs workers &lt;id&gt;</code></td></tr>
+        <tr><td>Reaper: <code>LRANGE jobs:processing</code> and check each claim's age</td><td><code>XPENDING jobs workers</code> shows idle time and delivery count</td></tr>
+        <tr><td>Reaper: requeue an abandoned job</td><td><code>XAUTOCLAIM jobs workers w2 10000 0</code> hands jobs idle more than 10 s to another worker</td></tr>
+        <tr><td><code>jobs:attempts</code> and <code>jobs:dead</code></td><td>Delivery count from <code>XPENDING</code>; past a limit, copy the job to a dead-letter stream and <code>XACK</code> it</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">Building it once with lists shows you what Streams, Kafka consumer groups and SQS visibility timeouts are doing under the hood.</p>
+</section>
+
+<section class="stage">
+  <div class="eyebrow">Think about it</div>
+  <h2>Questions</h2>
+  <ol class="panel plain">
+    <li>Why does the reaper put a requeued job at the <em>front</em> of the queue (<code>LPUSH</code>) instead of the back?</li>
+    <li>A worker is slow, not dead, and the reaper requeues its job. What happens when both workers finish? Why is that safe here, and when would it not be (think: charging a credit card)?</li>
+    <li>How long should the lease be? What goes wrong if it's 1 second? 1 hour?</li>
+    <li>Why is the requeue a Lua script and not three separate commands from Python?</li>
+    <li>Why keep a dead-letter list instead of retrying forever?</li>
+    <li>The project worker takes a batch of 32 jobs. How would claim and acknowledge work for a batch?</li>
+  </ol>
+</section>
+</div>
+
+<script>
+(() => {
+const NS = "http://www.w3.org/2000/svg";
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const sv = $("sv");
+const LEASE = 10, MAX = 3;
+const WEB = { x: 16, y: 60, w: 160, h: 96 };
+const RD = { x: 210, y: 14, w: 590, h: 440 };
+const Q = { x: 230, y: 70, w: 550, h: 58 }, PR = { x: 230, y: 176, w: 550, h: 58 };
+const CL = { x: 230, y: 282, w: 330, h: 156 }, RS = { x: 580, y: 282, w: 200, h: 156 };
+const W = { w1: { x: 840, y: 22, w: 244, h: 112, n: "Worker 1" }, w2: { x: 840, y: 152, w: 244, h: 112, n: "Worker 2" } };
+const RP = { x: 840, y: 300, w: 244, h: 140 };
+const g = { st: el("g", {}, sv), dyn: el("g", {}, sv), pk: el("g", {}, sv) };
+
+// static frame
+(function frame() {
+  el("rect", { class: "box", x: WEB.x, y: WEB.y, width: WEB.w, height: WEB.h, rx: 10 }, g.st);
+  el("text", { class: "t", x: WEB.x + 12, y: WEB.y + 26 }, g.st).textContent = "Web front door";
+  el("text", { class: "s", x: WEB.x + 12, y: WEB.y + 44 }, g.st).textContent = "RPUSH a job per image";
+  el("rect", { class: "box redis", x: RD.x, y: RD.y, width: RD.w, height: RD.h, rx: 12 }, g.st);
+  el("text", { class: "t redis", x: RD.x + 16, y: RD.y + 26 }, g.st).textContent = "Redis";
+  const lane = (b, label) => { el("text", { class: "s", x: b.x + 2, y: b.y - 8 }, g.st).textContent = label; el("rect", { class: "lane", x: b.x, y: b.y, width: b.w, height: b.h, rx: 8 }, g.st); };
+  lane(Q, "jobs:queue  (list)  ← workers take from the left");
+  lane(PR, "jobs:processing  (list)  claimed, not yet acknowledged");
+  lane(CL, "jobs:claims  (hash)  id → worker, claimed at");
+  lane(RS, "result:<id>  (strings)");
+  el("rect", { class: "box reaper", id: "rpbox", x: RP.x, y: RP.y, width: RP.w, height: RP.h, rx: 10 }, g.st);
+  el("text", { class: "t", x: RP.x + 12, y: RP.y + 26, style: "fill:var(--warn)" }, g.st).textContent = "Reaper";
+  el("text", { class: "s", x: RP.x + 12, y: RP.y + 44 }, g.st).textContent = `every few s: any claim older`;
+  el("text", { class: "s", x: RP.x + 12, y: RP.y + 60 }, g.st).textContent = `than the ${LEASE} s lease → requeue`;
+})();
+
+let S, gen = 0, fast = false, speed = 1;
+function fresh() {
+  return { T: 0, queue: [], proc: [], claims: {}, tries: {}, results: [], dead: [], hot: null, oldRow: null, reaperOn: false, reaperMsg: "sleeping",
+           w: { w1: { st: "idle", job: null }, w2: { st: "idle", job: null } }, lostNote: false };
+}
+const chipPos = (lane, i) => ({ x: lane.x + 10 + i * 54, y: lane.y + 8 });
+const wPos = k => ({ x: W[k].x + W[k].w - 58, y: W[k].y + 56 });
+
+function chip(parent, id, x, y, cls = "") {
+  const c = el("g", { class: "chip " + cls }, parent);
+  el("rect", { x, y, width: 44, height: 42, rx: 7 }, c);
+  el("text", { x: x + 22, y: y + 21 }, c).textContent = id;
+  return c;
+}
+function render() {
+  g.dyn.innerHTML = "";
+  $("clock").textContent = `t = ${S.T} s`;
+  S.queue.forEach((id, i) => { const p = chipPos(Q, i); chip(g.dyn, id, p.x, p.y, S.hot === id ? "hot" : ""); });
+  S.proc.forEach((id, i) => { const p = chipPos(PR, i); chip(g.dyn, id, p.x, p.y, S.hot === id ? "hot" : ""); });
+  if (!S.queue.length) el("text", { class: "s", x: Q.x + 14, y: Q.y + 34 }, g.dyn).textContent = "(empty)";
+  if (!S.proc.length) el("text", { class: "s", x: PR.x + 14, y: PR.y + 34 }, g.dyn).textContent = "(empty)";
+  if (S.lostNote) el("text", { class: "ghost", x: PR.x + 250, y: PR.y + 34 }, g.dyn).textContent = "with LPOP, B would be gone right now";
+  // claims rows
+  const ids = Object.keys(S.claims);
+  if (!ids.length) el("text", { class: "s", x: CL.x + 14, y: CL.y + 26 }, g.dyn).textContent = "(no claims)";
+  ids.forEach((id, i) => {
+    const c = S.claims[id], age = S.T - c.at, old = S.oldRow === id;
+    const r = el("g", { class: "row" + (old ? " old" : "") }, g.dyn), y = CL.y + 10 + i * 34;
+    el("rect", { x: CL.x + 10, y, width: CL.w - 20, height: 28, rx: 5 }, r);
+    el("text", { x: CL.x + 20, y: y + 14 }, r).textContent = `${id}: ${c.w}, t=${c.at}`;
+    el("text", { class: "age", x: CL.x + CL.w - 20, y: y + 14, "text-anchor": "end" }, r).textContent = `age ${age}s · try ${S.tries[id] || 0}`;
+  });
+  S.results.forEach((id, i) => { chip(g.dyn, id, RS.x + 10 + (i % 3) * 60, RS.y + 10, "ok"); });
+  if (S.dead.length) {
+    el("text", { class: "s", x: RS.x + 10, y: RS.y + 84 }, g.dyn).textContent = "jobs:dead  (list)";
+    S.dead.forEach((id, i) => chip(g.dyn, id, RS.x + 10 + i * 54, RS.y + 92, "dead"));
+  }
+  for (const k of ["w1", "w2"]) {
+    const b = W[k], w = S.w[k];
+    el("rect", { class: "box" + (w.st === "crashed" ? " crashed" : w.st.startsWith("working") ? " busy" : ""), x: b.x, y: b.y, width: b.w, height: b.h, rx: 10 }, g.dyn);
+    el("text", { class: "t", x: b.x + 12, y: b.y + 26 }, g.dyn).textContent = b.n;
+    el("text", { class: "st" + (w.st === "crashed" ? " bad" : w.st === "saved" ? " good" : ""), x: b.x + 12, y: b.y + 48 }, g.dyn).textContent =
+      w.st === "crashed" ? "CRASHED" : w.st === "idle" ? "BLMOVE … waiting" : w.st;
+    if (w.job) chip(g.dyn, w.job, wPos(k).x, wPos(k).y, w.st === "crashed" ? "dead" : "");
+    if (w.st === "crashed") el("text", { class: "bang", x: b.x + 140, y: b.y + 32 }, g.dyn).textContent = "✗";
+  }
+  $("rpbox").setAttribute("class", "box reaper" + (S.reaperOn ? " on" : ""));
+  el("text", { class: "st", x: RP.x + 12, y: RP.y + 92, style: "fill:var(--warn)" }, g.dyn).textContent = S.reaperMsg;
+}
+
+// ---------- animation helpers ----------
+const dur = ms => (fast || REDUCED) ? 0 : ms / speed;
+async function wait(ms) { const g0 = gen, d = dur(ms); if (d) await sleep(d); if (g0 !== gen) throw "cancel"; }
+function fly(a, b, draw, ms = 800) {
+  const d = dur(ms); if (!d) return Promise.resolve();
+  const g0 = gen, node = draw(); g.pk.appendChild(node);
+  return new Promise((res, rej) => {
+    const s0 = performance.now();
+    const f = now => {
+      if (g0 !== gen) { node.remove(); return rej("cancel"); }
+      const p = Math.min(1, (now - s0) / d), e = p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      node.setAttribute("transform", `translate(${a.x + (b.x - a.x) * e},${a.y + (b.y - a.y) * e})`);
+      if (p < 1) requestAnimationFrame(f); else { node.remove(); res(); }
+    };
+    requestAnimationFrame(f);
+  });
+}
+const pkt = (label, kind) => () => {
+  const n = el("g", { class: "pkt " + kind }), r = el("rect", { rx: 6, height: 24, y: -12 }, n), t = el("text", {}, n);
+  t.textContent = label; const w = label.length * 7.4 + 16; r.setAttribute("width", w); r.setAttribute("x", -w / 2); return n;
+};
+const chipFly = id => () => { const n = el("g"); chip(n, id, -22, -21); return n; };
+const send = (a, b, label, kind = "cmd", ms = 800) => fly(a, b, pkt(label, kind), ms);
+const center = p => ({ x: p.x + 22, y: p.y + 21 });
+const wL = k => ({ x: W[k].x, y: W[k].y + 60 });
+const redisR = k => ({ x: RD.x + RD.w - 8, y: W[k].y + 60 });
+
+async function push(id) {
+  await fly({ x: WEB.x + WEB.w, y: WEB.y + 50 }, center(chipPos(Q, S.queue.length)), chipFly(id), 700);
+  S.queue.push(id); render();
+}
+async function claim(k) {
+  await send(wL(k), redisR(k), "BLMOVE queue → processing", "cmd", 800);
+  const id = S.queue[0];
+  S.hot = id; render(); await wait(250);
+  await fly(center(chipPos(Q, 0)), center(chipPos(PR, S.proc.length)), chipFly(id), 800);
+  S.queue.shift(); S.proc.push(id); render();
+  await send(redisR(k), wL(k), id, "data", 600);
+  S.w[k] = { st: `working on ${id}`, job: id };
+  S.tries[id] = (S.tries[id] || 0) + 1;
+  S.claims[id] = { w: k, at: S.T }; S.hot = null; render();
+  await send(wL(k), redisR(k), `HSET claims ${id}`, "cmd", 600);
+}
+async function finish(k) {
+  const id = S.w[k].job;
+  await send(wL(k), { x: RS.x + 100, y: RS.y + 30 }, `SET result:${id}`, "data", 900);
+  S.results.push(id); S.w[k].st = "saved"; render(); await wait(300);
+  await send(wL(k), redisR(k), `LREM processing ${id} · HDEL`, "cmd", 900);
+  S.proc = S.proc.filter(x => x !== id); delete S.claims[id]; delete S.tries[id];
+  S.w[k] = { st: "idle", job: null }; render();
+}
+async function crash(k) {
+  S.w[k].st = "crashed"; render(); await wait(600);
+}
+async function reaperCheck() {
+  S.reaperOn = true; S.reaperMsg = "LRANGE processing 0 -1"; render();
+  await send({ x: RP.x, y: RP.y + 60 }, { x: RD.x + RD.w - 8, y: RP.y + 60 }, "LRANGE processing", "warn", 800);
+  await wait(300);
+}
+async function reaperRequeue(id) {
+  S.oldRow = id; S.hot = id; S.reaperMsg = `${id}: age ${S.T - S.claims[id].at}s > ${LEASE}s lease`; render(); await wait(900);
+  const toDead = (S.tries[id] || 0) >= MAX;
+  await send({ x: RP.x, y: RP.y + 60 }, { x: RD.x + RD.w - 8, y: RP.y + 60 }, toDead ? "EVAL requeue → dead" : "EVAL requeue", "warn", 800);
+  const from = center(chipPos(PR, S.proc.indexOf(id)));
+  S.proc = S.proc.filter(x => x !== id); delete S.claims[id]; S.oldRow = null; render();
+  if (toDead) { await fly(from, { x: RS.x + 32 + S.dead.length * 54, y: RS.y + 113 }, chipFly(id), 900); S.dead.push(id); delete S.tries[id]; S.reaperMsg = `${id} → jobs:dead (${MAX} tries)`; }
+  else { await fly(from, center(chipPos(Q, 0)), chipFly(id), 900); S.queue.unshift(id); S.reaperMsg = `${id} back at the front`; }
+  S.hot = null; render(); await wait(400);
+  S.reaperOn = false; render();
+}
+
+const STEPS = [
+  { title: "Three jobs are queued", cmd: "RPUSH jobs:queue A\nRPUSH jobs:queue B\nRPUSH jobs:queue C",
+    text: "The web front door pushes one job per image. Two workers are waiting in <code>BLMOVE</code>, a blocking version of <code>LMOVE</code>.",
+    run: async () => { await push("A"); await push("B"); await push("C"); } },
+  { title: "Worker 1 claims A", cmd: "BLMOVE jobs:queue jobs:processing 5 LEFT RIGHT   → A\nHSET jobs:claims A '{\"worker\": \"w1\", \"at\": 1}'",
+    text: "One atomic command takes A off the left of the queue <b>and</b> puts it on the processing list. There is no moment when A is only in the worker's memory. Then the worker writes a claim saying who has it and since when.",
+    run: async () => { S.T = 1; await claim("w1"); } },
+  { title: "Worker 2 claims B", cmd: "BLMOVE … → B\nHSET jobs:claims B '{\"worker\": \"w2\", \"at\": 2}'",
+    text: "Same thing for the other worker. Two workers can never get the same job, because each <code>BLMOVE</code> is atomic.",
+    run: async () => { S.T = 2; await claim("w2"); } },
+  { title: "Worker 1 finishes A: save, then acknowledge", cmd: "SET result:A '[{…top 5…}]'\nLREM jobs:processing 1 A\nHDEL jobs:claims A",
+    text: "The happy path. The worker saves the result <em>first</em>, then removes A from the processing list and deletes its claim. A is done and Redis forgets it.",
+    run: async () => { S.T = 4; await finish("w1"); } },
+  { title: "Worker 1 claims C", cmd: "BLMOVE … → C",
+    text: "The worker goes straight back for the next job.",
+    run: async () => { S.T = 5; await claim("w1"); } },
+  { title: "Worker 2 crashes in the middle of B", cmd: "# out of memory, kill -9, the VM is gone, the laptop lid closed…",
+    text: "Worker 2 never acknowledges B. But B is still sitting in <code>jobs:processing</code>, and its claim says Worker 2 took it at t=2. With the old <code>LPOP</code> design, B would be gone and that user would wait forever.",
+    run: async () => { S.T = 6; await crash("w2"); S.lostNote = true; render(); } },
+  { title: "Worker 1 finishes C", cmd: "SET result:C …\nLREM jobs:processing 1 C\nHDEL jobs:claims C",
+    text: "Life goes on. Only B is left in the processing list, and its claim gets older every second.",
+    run: async () => { S.T = 8; S.lostNote = false; await finish("w1"); } },
+  { title: "The reaper wakes up and checks the processing list", cmd: "LRANGE jobs:processing 0 -1     → [B]\nHGET jobs:claims B               → {\"worker\": \"w2\", \"at\": 2}",
+    text: "A separate process, running on a timer, looks at everything that's been claimed. It's now t=14, so B's claim is 12 seconds old, past the 10-second lease.",
+    run: async () => { S.T = 14; render(); await reaperCheck(); } },
+  { title: "The reaper puts B back at the front of the queue", cmd: "EVAL requeue.lua   # inside Redis, all at once:\n  LREM jobs:processing 1 B   (returns 1, so nobody acked it)\n  HDEL jobs:claims B\n  LPUSH jobs:queue B",
+    text: "A small Lua script does the check and the move atomically. If the worker had acknowledged B a moment earlier, <code>LREM</code> would return 0 and the script would leave it alone. <code>LPUSH</code> puts B at the front because it has already waited.",
+    run: async () => { await reaperRequeue("B"); } },
+  { title: "Worker 1 picks B up and finishes it", cmd: "BLMOVE … → B      (try 2)\nSET result:B …\nLREM jobs:processing 1 B",
+    text: "Every job has a result, even though a worker died. Nothing was lost.",
+    run: async () => { S.T = 15; await claim("w1"); S.T = 17; await finish("w1"); } },
+  { title: "What if Worker 2 was only slow, not dead?", cmd: "# both workers finish B:\nSET result:B …   # w1\nSET result:B …   # w2, same answer\nLREM … → 0       # w2's ack finds nothing: harmless",
+    text: "The reaper can't tell slow from dead. If the lease runs out on a slow worker, the job runs twice. That's fine here because the second <code>SET</code> writes the same answer. This is <b>at-least-once</b> processing. Long jobs call <code>heartbeat()</code> to refresh <code>at</code> so this rarely happens. (A supervisor such as systemd or Kubernetes restarts the crashed worker.)",
+    run: async () => { S.T = 20; S.w.w2 = { st: "idle", job: null }; render(); await wait(400); } },
+  { title: "A poison job: D crashes every worker that touches it", cmd: "HGET jobs:attempts D   → 3\n# requeue.lua: tries >= MAX_ATTEMPTS\nRPUSH jobs:dead D",
+    text: "Suppose image D is corrupt and kills any worker that opens it. D has already crashed workers twice. On the third crash the reaper sees 3 attempts and moves D to a <b>dead-letter</b> list instead of back into the queue, so a person can look at it. Without this, D would crash workers forever.",
+    run: async () => {
+      await push("D"); S.T = 21; await claim("w2"); S.tries.D = 3; render(); await wait(400);
+      S.T = 22; await crash("w2"); S.T = 33; render(); await reaperCheck(); await reaperRequeue("D");
+    } },
+];
+
+let i = 0, playing = false, busy = false;
+STEPS.forEach((s, k) => { const li = document.createElement("li"); li.textContent = s.title; li.onclick = () => jump(k + 1); $("steps").appendChild(li); });
+function caption(k) {
+  const s = k == null ? { title: "Two workers, a crash and a reaper", text: "Press <b>Play</b>, or <b>Next</b> to go one step at a time. Click any step to jump there." } : STEPS[k];
+  $("c-no").textContent = k == null ? `${STEPS.length} steps` : `Step ${k + 1} of ${STEPS.length}`;
+  $("c-title").textContent = s.title; $("c-cmd").textContent = s.cmd || ""; $("c-text").innerHTML = s.text;
+  [...$("steps").children].forEach((li, n) => li.className = k != null && n < k ? "done" : n === k ? "now" : "");
+  $("b-play").textContent = playing ? "Pause" : i >= STEPS.length ? "Replay" : "Play";
+  $("b-next").disabled = busy || i >= STEPS.length; $("b-back").disabled = i === 0;
+}
+function reset() { gen++; S = fresh(); g.pk.innerHTML = ""; render(); }
+async function runStep() {
+  const k = i; busy = true; caption(k);
+  try { await STEPS[k].run(); } catch (e) { busy = false; return false; }
+  i = k + 1; busy = false; caption(k); return true;
+}
+async function jump(n) {
+  playing = false; reset(); i = 0; fast = true;
+  for (let k = 0; k < n; k++) { await STEPS[k].run(); i = k + 1; }
+  fast = false; busy = false; caption(n ? n - 1 : null);
+}
+$("b-next").onclick = () => { if (!busy && i < STEPS.length) runStep(); };
+$("b-back").onclick = () => jump(Math.max(0, i - 1));
+$("b-reset").onclick = () => jump(0);
+$("b-speed").onchange = e => { speed = +e.target.value; };
+$("b-play").onclick = async () => {
+  if (playing) { playing = false; caption(i ? i - 1 : null); return; }
+  if (i >= STEPS.length) await jump(0);
+  playing = true; const g0 = gen;
+  while (busy) await sleep(50);
+  while (playing && g0 === gen && i < STEPS.length) {
+    if (!(await runStep())) return;
+    if (i < STEPS.length) { try { await wait(1100); } catch (e) { return; } }
+  }
+  playing = false; caption(i - 1);
+};
+reset(); caption(null);
+})();
+</script>
+</body>
+</html>

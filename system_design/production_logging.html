@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Production Logging</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: header · why not Redis · the pipeline diagram · the systems table · habits · further reading */
+:root {
+  --bg: #f2f3f6; --surface: #ffffff; --ink: #161a22; --muted: #5a6373; --line: #d3d8e1;
+  --accent: #6b4fd8; --accent-bg: #efebfd;
+  --redis: #c8312a; --redis-bg: #fbeceb;
+  --data: #1f63c4; --data-bg: #e7effb;
+  --good: #0d7a50; --good-bg: #e1f4eb;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+    --accent: #a993ff; --accent-bg: #221c3a; --redis: #f0605a; --redis-bg: #2c1716;
+    --data: #74a9ff; --data-bg: #17253b; --good: #43d199; --good-bg: #112a20; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+  --accent: #a993ff; --accent-bg: #221c3a; --redis: #f0605a; --redis-bg: #2c1716;
+  --data: #74a9ff; --data-bg: #17253b; --good: #43d199; --good-bg: #112a20; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 17px; line-height: 1.5; }
+.wrap { max-width: 1100px; margin: 0 auto; padding: 28px 16px 64px; }
+h1, h2, h3 { font-family: var(--f-display); letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(30px, 4.4vw, 46px); font-weight: 800; line-height: 1.05; }
+h1 .a { color: var(--accent); }
+h2 { font-size: clamp(22px, 2.6vw, 28px); font-weight: 800; }
+p { margin: 0; max-width: 74ch; }
+a { color: var(--data); }
+code { font-family: var(--f-mono); font-size: 0.86em; }
+.credit { color: var(--muted); font-size: 13px; font-style: italic; }
+header { display: grid; gap: 12px; }
+section { margin-top: 40px; display: grid; gap: 14px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.diagram { overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+ul.plain { margin: 0; padding: 16px 16px 16px 36px; display: grid; gap: 6px; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--f-display); font-weight: 600; background: var(--bg); }
+td:first-child { font-weight: 700; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.note { font-size: 15px; color: var(--muted); }
+pre { margin: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; font-family: var(--f-mono); font-size: 13.5px; }
+/* svg */
+svg text { font-family: var(--f-body); }
+.bx { fill: var(--surface); stroke: var(--line); stroke-width: 2; }
+.bx.a { fill: var(--accent-bg); stroke: var(--accent); }
+.bx.k { fill: var(--data-bg); stroke: var(--data); }
+.bx.s { fill: var(--good-bg); stroke: var(--good); }
+.t { font-family: var(--f-display); font-weight: 600; font-size: 16px; fill: var(--ink); }
+.s { font-family: var(--f-mono); font-size: 11px; fill: var(--muted); }
+.st { font-family: var(--f-mono); font-size: 11.5px; fill: var(--ink); }
+.ar { stroke: var(--muted); stroke-width: 2; fill: none; }
+.flow { stroke: var(--accent); stroke-width: 2.5; fill: none; stroke-dasharray: 8 7; }
+@media (prefers-reduced-motion: no-preference) { .flow { animation: f 1.2s linear infinite; } }
+@keyframes f { to { stroke-dashoffset: -15; } }
+.cap { font-family: var(--f-mono); font-size: 10.5px; fill: var(--accent); text-transform: uppercase; letter-spacing: .06em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="eyebrow">CS 452 · System design · FYI</div>
+  <h1>Where logs live <span class="a">in production</span></h1>
+  <p>Pushing log lines to a Redis list works fine for a class project. In production, logs are huge, written all the time and rarely read, so teams use systems built for exactly that. Here is what they look like.</p>
+  <p class="credit">[Page created using Claude by Professor Reynolds]</p>
+</header>
+
+<section>
+  <div class="eyebrow">Why not Redis?</div>
+  <h2>Redis is the wrong shape for logs</h2>
+  <ul class="panel plain">
+    <li><b>It keeps everything in RAM.</b> A busy service writes gigabytes of logs a day. Keeping 30 days of that in memory costs far more than compressed files on disk or in object storage.</li>
+    <li><b>It can't search inside the text.</b> "Every error mentioning image <code>7f3a…</code> in the last hour" means reading the whole list.</li>
+    <li><b>A list grows forever</b> unless you cap it, and capping it (<code>LTRIM</code>, or <code>XADD … MAXLEN</code>) throws away old logs exactly when you need to look back.</li>
+    <li><b>Logs and work share one server.</b> A flood of log writes slows down the queue it's supposed to be watching.</li>
+  </ul>
+  <p class="note">Redis does have a good logging role: a short, capped buffer of <em>recent</em> events (a Redis Stream with <code>MAXLEN</code>) for a live dashboard.</p>
+</section>
+
+<section>
+  <div class="eyebrow">The shape of a logging system</div>
+  <h2>Write to stdout, ship, buffer, store, search</h2>
+  <div class="panel diagram"><svg viewBox="0 0 1060 300" role="img" aria-label="Apps write JSON logs to stdout, an agent ships them, Kafka buffers, a log store indexes them, and Grafana or Kibana queries and alerts">
+    <defs><marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/></marker></defs>
+    <text class="cap" x="20" y="24">1 · apps</text>
+    <rect class="bx" x="20" y="36" width="170" height="64" rx="9"/><text class="t" x="32" y="62">web server</text><text class="s" x="32" y="82">print(json) → stdout</text>
+    <rect class="bx" x="20" y="114" width="170" height="64" rx="9"/><text class="t" x="32" y="140">worker × 50</text><text class="s" x="32" y="160">print(json) → stdout</text>
+    <rect class="bx" x="20" y="192" width="170" height="64" rx="9"/><text class="t" x="32" y="218">reaper</text><text class="s" x="32" y="238">print(json) → stdout</text>
+    <text class="cap" x="240" y="24">2 · agent on each machine</text>
+    <rect class="bx a" x="240" y="100" width="180" height="96" rx="9"/><text class="t" x="252" y="128">collector</text>
+    <text class="s" x="252" y="148">Fluent Bit · Vector</text><text class="s" x="252" y="164">OpenTelemetry Collector</text><text class="s" x="252" y="180">Grafana Alloy</text>
+    <text class="cap" x="470" y="24">3 · buffer (big systems)</text>
+    <rect class="bx k" x="470" y="100" width="170" height="96" rx="9"/><text class="t" x="482" y="128">Kafka</text>
+    <text class="s" x="482" y="148">durable, replayable</text><text class="s" x="482" y="164">absorbs spikes</text><text class="s" x="482" y="180">many readers</text>
+    <text class="cap" x="690" y="24">4 · store + index</text>
+    <rect class="bx s" x="690" y="50" width="170" height="64" rx="9"/><text class="t" x="702" y="76">Loki</text><text class="s" x="702" y="96">labels + object storage</text>
+    <rect class="bx s" x="690" y="124" width="170" height="64" rx="9"/><text class="t" x="702" y="150">Elasticsearch</text><text class="s" x="702" y="170">full-text index</text>
+    <rect class="bx s" x="690" y="198" width="170" height="64" rx="9"/><text class="t" x="702" y="224">ClickHouse</text><text class="s" x="702" y="244">columns + SQL</text>
+    <text class="cap" x="900" y="24">5 · people</text>
+    <rect class="bx" x="900" y="80" width="140" height="64" rx="9"/><text class="t" x="912" y="106">Grafana</text><text class="s" x="912" y="126">Kibana · search</text>
+    <rect class="bx" x="900" y="160" width="140" height="64" rx="9"/><text class="t" x="912" y="186">alerts</text><text class="s" x="912" y="206">"errors &gt; 1%"</text>
+    <path class="flow" d="M190,68 C215,68 215,140 238,140" marker-end="url(#m)"/>
+    <path class="flow" d="M190,146 L238,146" marker-end="url(#m)"/>
+    <path class="flow" d="M190,224 C215,224 215,152 238,152" marker-end="url(#m)"/>
+    <path class="flow" d="M420,148 L468,148" marker-end="url(#m)"/>
+    <path class="flow" d="M640,140 C665,140 665,82 688,82" marker-end="url(#m)"/>
+    <path class="flow" d="M640,148 L688,156" marker-end="url(#m)"/>
+    <path class="flow" d="M640,156 C665,156 665,230 688,230" marker-end="url(#m)"/>
+    <path class="flow" d="M860,150 C880,150 880,112 898,112" marker-end="url(#m)"/>
+    <path class="flow" d="M860,160 C880,160 880,192 898,192" marker-end="url(#m)"/>
+    <text class="s" x="20" y="288">Apps don't talk to the log store. They write lines; the platform collects them. Swap the store and no app code changes.</text>
+  </svg></div>
+</section>
+
+<section>
+  <div class="eyebrow">The common choices</div>
+  <h2>Which system does what</h2>
+  <div class="panel tablewrap">
+    <table>
+      <thead><tr><th>System</th><th>How it stores logs</th><th>Good at</th><th>Trade-off</th></tr></thead>
+      <tbody>
+        <tr><td>Grafana Loki</td><td>Indexes only a few labels (service, host, level); the log text goes into compressed chunks in object storage (S3, GCS).</td><td>Cheap at large volume. Fits with Grafana dashboards and Prometheus metrics.</td><td>Searching inside the text scans chunks, so keep labels useful and time ranges small.</td></tr>
+        <tr><td>Elasticsearch / OpenSearch</td><td>A full-text inverted index on every field (the "ELK" stack, with Logstash and Kibana).</td><td>Fast free-text search and rich filtering.</td><td>The index is big; storage and memory get expensive at scale.</td></tr>
+        <tr><td>Apache Kafka</td><td>An append-only, replicated log of messages kept for a set time or size.</td><td>Transport and buffering: absorbs bursts, lets several systems read the same logs, replays after an outage.</td><td>Not a place to search logs. It sits in front of the store.</td></tr>
+        <tr><td>ClickHouse</td><td>A column store with heavy compression, queried with SQL.</td><td>Analytics over billions of rows ("p99 latency by endpoint"). Uber and Cloudflare have written about using it for logs.</td><td>You design the table schema; free-text search is weaker than Elasticsearch.</td></tr>
+        <tr><td>Managed services</td><td>Google Cloud Logging, AWS CloudWatch Logs, Azure Monitor, Datadog, Splunk.</td><td>Nothing to run. Collection is often automatic on that cloud.</td><td>You pay per GB ingested and stored, which adds up fast.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="eyebrow">Habits that carry over</div>
+  <h2>What to do in any of them, including your project</h2>
+  <ul class="panel plain">
+    <li><b>Structured logs:</b> one JSON object per line, with the same field names everywhere.</li>
+    <li><b>A request id on every line.</b> The project's UUID is perfect: put it in the web server's and the worker's log lines, and one search shows a request's whole story across machines.</li>
+    <li><b>Levels</b> (<code>DEBUG</code>, <code>INFO</code>, <code>WARN</code>, <code>ERROR</code>) so you can keep errors for a year and debug chatter for a day.</li>
+    <li><b>Never log secrets</b> (passwords, tokens like your Redis password) or personal data you don't need.</li>
+    <li><b>Logs, metrics and traces</b> are three different tools. Counting requests per second is a metric (Prometheus), not a log search. <a href="https://opentelemetry.io/" target="_blank">OpenTelemetry</a> is the standard way to emit all three.</li>
+  </ul>
+<pre>{"ts": "2026-11-09T18:02:11.482Z", "level": "INFO", "service": "model_server", "host": "worker-3",
+ "script": "run_model_server.py", "request_id": "7f3a9c2e-…", "action": "classified", "ms": 1840}</pre>
+</section>
+</div>
+</body>
+</html>
