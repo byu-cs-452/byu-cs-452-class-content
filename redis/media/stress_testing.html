@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stress Testing the Queue</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: header · 1 what your test tests · 2 find the bottleneck (interactive) · 3 make the test measure · 4 remove bottlenecks locally · 5 real load tests · questions */
+:root {
+  --bg: #f2f3f6; --surface: #ffffff; --ink: #161a22; --muted: #5a6373; --line: #d3d8e1;
+  --redis: #c8312a; --redis-bg: #fbeceb;
+  --data: #1f63c4; --data-bg: #e7effb;
+  --good: #0d7a50; --good-bg: #e1f4eb;
+  --bad: #b42318; --bad-bg: #fdeceb;
+  --warn: #a15c00; --warn-bg: #fdf1dc;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+    --redis: #f0605a; --redis-bg: #2c1716; --data: #74a9ff; --data-bg: #17253b;
+    --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+    --warn: #f0b04a; --warn-bg: #2e2412; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+  --redis: #f0605a; --redis-bg: #2c1716; --data: #74a9ff; --data-bg: #17253b;
+  --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+  --warn: #f0b04a; --warn-bg: #2e2412; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 17px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
+h1, h2, h3 { font-family: var(--f-display); letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(30px, 4.4vw, 48px); font-weight: 800; line-height: 1.05; }
+h1 .r { color: var(--redis); }
+h2 { font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; }
+h3 { font-size: 18px; font-weight: 600; }
+p { margin: 0; max-width: 76ch; }
+a { color: var(--data); }
+code, pre { font-family: var(--f-mono); font-size: 0.86em; }
+.credit { color: var(--muted); font-size: 13px; font-style: italic; }
+header { display: grid; gap: 12px; }
+nav.jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+nav.jump a { font-size: 14px; text-decoration: none; color: var(--ink); border: 1px solid var(--line); background: var(--surface); padding: 5px 12px; border-radius: 999px; }
+nav.jump a:hover, nav.jump a:focus-visible { border-color: var(--redis); outline: none; }
+section { margin-top: 46px; display: grid; gap: 14px; scroll-margin-top: 12px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--redis); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+ul.plain, ol.plain { margin: 0; padding: 16px 16px 16px 36px; display: grid; gap: 7px; }
+.note { font-size: 15px; color: var(--muted); }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .two { grid-template-columns: minmax(0, 1fr); } }
+pre.code { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; line-height: 1.5; }
+pre .c { color: var(--muted); }
+.callout { padding: 14px 16px; display: grid; gap: 6px; border-left: 5px solid var(--warn); }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--f-display); font-weight: 600; background: var(--bg); }
+td:first-child { font-weight: 700; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+
+/* simulator */
+.sim { padding: 16px; display: grid; gap: 14px; }
+.knobs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 18px; }
+@media (max-width: 860px) { .knobs { grid-template-columns: minmax(0, 1fr); } }
+.knob { display: grid; gap: 4px; }
+.knob .lbl { font-family: var(--f-mono); font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; width: fit-content; }
+.seg button { font: inherit; font-size: 14px; padding: 5px 10px; border: 0; background: var(--surface); color: var(--ink); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); font-weight: 700; }
+.seg button:focus-visible { outline: 2px solid var(--redis); outline-offset: -2px; }
+.presets { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.presets button { font: inherit; font-size: 14px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+.presets button:hover { border-color: var(--redis); }
+.stages { display: grid; gap: 6px; }
+.stage { display: grid; grid-template-columns: 220px 1fr 120px; gap: 12px; align-items: center; font-size: 15px; }
+@media (max-width: 700px) { .stage { grid-template-columns: 1fr 90px; } .stage .track { grid-column: 1 / -1; grid-row: 2; } }
+.stage .name small { display: block; color: var(--muted); font-size: 12.5px; }
+.track { position: relative; height: 22px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.fill { position: absolute; inset: 0 auto 0 0; background: var(--data); opacity: .75; border-radius: 5px; transition: width .35s; }
+.stage.neck .fill { background: var(--bad); opacity: .9; }
+.loadmark { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--ink); transition: left .35s; }
+.stage .val { font-family: var(--f-mono); font-size: 14px; text-align: right; font-variant-numeric: tabular-nums; }
+.stage.neck .val { color: var(--bad); font-weight: 700; }
+.axis { display: grid; grid-template-columns: 220px 1fr 120px; gap: 12px; font-family: var(--f-mono); font-size: 11px; color: var(--muted); }
+.axis .ticks { display: flex; justify-content: space-between; }
+@media (max-width: 700px) { .axis { display: none; } }
+.out { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 860px) { .out { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stat { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.stat .n { font: 800 24px var(--f-display); font-variant-numeric: tabular-nums; }
+.stat .t { font-size: 12.5px; color: var(--muted); }
+.stat.bad { border-color: var(--bad); background: var(--bad-bg); } .stat.bad .n { color: var(--bad); }
+.verdict { font-size: 16px; padding: 10px 12px; border-radius: 8px; background: var(--bg); border-left: 5px solid var(--bad); }
+.verdict.ok { border-left-color: var(--good); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="eyebrow">CS 452 · Redis work queue project · going further</div>
+  <h1>Stress testing <span class="r">the work queue</span></h1>
+  <p>"Stress test" sounds like it measures how much load your system can take. A test only measures its <b>narrowest point</b>, though, and in this project that's often not the part you think. Before trusting a number, ask what your test is really testing.</p>
+  <p class="credit">[Page created using Claude by Professor Reynolds]</p>
+  <nav class="jump" aria-label="Sections">
+    <a href="#what">1 · What your test tests</a>
+    <a href="#neck">2 · Find the bottleneck</a>
+    <a href="#measure">3 · Make it measure</a>
+    <a href="#local">4 · Remove local bottlenecks</a>
+    <a href="#real">5 · Real load tests</a>
+    <a href="#questions">Questions</a>
+  </nav>
+</header>
+
+<section id="what">
+  <div class="eyebrow">1 · Read the test first</div>
+  <h2>What <code>stress_test.py</code> actually does</h2>
+  <div class="two">
+    <ul class="panel plain">
+      <li><b>20 requests, 50 ms apart,</b> from 20 threads in <b>one</b> Python process on your laptop. That's a single burst of about 20 requests in one second, not sustained traffic.</li>
+      <li><b>The same 432 KB PNG</b> (<code>jemma.png</code>) every time, read from disk again in each thread.</li>
+      <li><b>It measures nothing.</b> It prints the predictions, then sleeps 300 seconds. There's no timing, no count of failures, no throughput.</li>
+      <li><b>The client, the web server, the worker and TensorFlow all share one laptop</b>, so the load generator competes with the thing it's testing.</li>
+    </ul>
+    <div class="panel callout">
+      <h3>The surprise: each job is 0.8 MB in Redis</h3>
+      <p>The web server resizes the picture to 224×224, stores it as <b>float32</b> (224 × 224 × 3 × 4 bytes = 602 KB) and base64-encodes it (×4/3 → about <b>800 KB</b>). A 77 KB castle JPEG becomes 800 KB of text pushed to Redis, then pulled back down by the worker.</p>
+      <p>With a free cloud Redis, every job crosses your home internet connection twice, and the 30 MB database holds only about 37 jobs at once. So the default test mostly measures <b>your upload speed and the free tier's memory</b>, not your queue design.</p>
+    </div>
+  </div>
+</section>
+
+<section id="neck">
+  <div class="eyebrow">2 · Interactive · find the bottleneck</div>
+  <h2>A pipeline is only as fast as its narrowest stage</h2>
+  <p>Each bar is how many requests per second that stage can handle. The black line is the load you send. Whatever stage is shortest sets the speed of the whole system, and work piles up in front of it. Change one thing at a time and watch the bottleneck move.</p>
+  <div class="panel sim">
+    <div class="presets"><span class="note">Try:</span>
+      <button type="button" data-p="default">The project as given</button>
+      <button type="button" data-p="local">Local Redis</button>
+      <button type="button" data-p="small">+ smaller payload</button>
+      <button type="button" data-p="workers">+ 4 workers</button>
+      <button type="button" data-p="plumbing">Test only the plumbing</button>
+    </div>
+    <div class="knobs" id="knobs"></div>
+    <div class="axis"><span></span><span class="ticks"><span>1</span><span>10</span><span>100</span><span>1,000</span><span>10,000 req/s</span></span><span></span></div>
+    <div class="stages" id="stages"></div>
+    <div class="out" id="out"></div>
+    <div class="verdict" id="verdict" aria-live="polite"></div>
+  </div>
+  <p class="note">Rough numbers for a typical laptop and home connection (20 Mbps up, 100 Mbps down), ResNet50 on a CPU at about 16 images per second, and the Flask development server. Your numbers will differ. The <em>shape</em> is what matters: one stage limits everything, and fixing it hands the job to the next one.</p>
+</section>
+
+<section id="measure">
+  <div class="eyebrow">3 · A test should produce numbers</div>
+  <h2>Make the stress test measure something</h2>
+  <p>Read the image once, time every request, and report what a user would feel: how many requests finished per second, the median and the slow tail (p95), and how many failed.</p>
+<pre class="code">import time, statistics, requests
+from concurrent.futures import ThreadPoolExecutor
+
+URL, N, CONCURRENCY = "http://localhost:5000/predict", 200, 20
+IMAGE = open("castle_image.jpg", "rb").read()        <span class="c"># read once, not once per thread</span>
+
+def one(_):
+    t0 = time.perf_counter()
+    try:
+        ok = requests.post(URL, files={"image": IMAGE}, timeout=60).json()["success"]
+    except Exception:
+        ok = False
+    return ok, time.perf_counter() - t0
+
+start = time.perf_counter()
+with ThreadPoolExecutor(CONCURRENCY) as pool:        <span class="c"># the with-block joins every thread</span>
+    results = list(pool.map(one, range(N)))
+elapsed = time.perf_counter() - start
+
+times = sorted(t for ok, t in results if ok)
+fails = sum(not ok for ok, _ in results)
+print(f"{N} requests in {elapsed:.1f}s = {N / elapsed:.1f} req/s, {fails} failed")
+print(f"median {statistics.median(times):.2f}s  p95 {times[int(len(times) * .95) - 1]:.2f}s  max {times[-1]:.2f}s")</pre>
+  <p class="note">Also watch the server side while it runs: <code>LLEN image_queue</code> (is the backlog growing?), <code>INFO memory</code> in Redis, and CPU in Task Manager or <code>top</code>. A growing queue means the worker is the bottleneck; a busy client CPU means the test itself is.</p>
+</section>
+
+<section id="local">
+  <div class="eyebrow">4 · Stress the system, not your Wi-Fi</div>
+  <h2>Removing bottlenecks so you test what you meant to</h2>
+  <div class="panel tablewrap">
+    <table>
+      <thead><tr><th>Bottleneck</th><th>Why it's there</th><th>How to remove it for a local test</th></tr></thead>
+      <tbody>
+        <tr><td>Home internet</td><td>Every job goes up to a cloud Redis and back down, 0.8 MB each way.</td><td>Run Redis locally: <code>docker run -p 6379:6379 redis:7</code> (or WSL). Point <code>settings.py</code> at <code>localhost</code>.</td></tr>
+        <tr><td>Free tier memory</td><td>30 MB ÷ 0.8 MB ≈ 37 waiting jobs, then writes fail.</td><td>Local Redis has gigabytes. Or shrink each job (next row).</td></tr>
+        <tr><td>Payload size</td><td>float32 + base64 makes each image 10× bigger than the JPEG.</td><td>Send uint8 pixels (150 KB, ~200 KB base64), or push the original JPEG bytes and let the worker resize. Same answer, a fraction of the bytes.</td></tr>
+        <tr><td>One worker</td><td>ResNet50 on a CPU handles about 16 images per second, and the original code breaks with two workers.</td><td>Fix the atomic pop (deliverable 4), then run several workers. Each needs a CPU core and about 1 GB of RAM.</td></tr>
+        <tr><td>Flask dev server</td><td><code>app.run()</code> is one process for development; the image preprocessing runs there too.</td><td>Use a real server with several processes: <code>gunicorn -w 4 run_web_server:app</code> (macOS/Linux) or <code>waitress-serve --threads 8 run_web_server:app</code> (Windows).</td></tr>
+        <tr><td>Polling sleeps</td><td>Every request waits up to 0.25 s extra, and waiting requests hammer Redis with GETs.</td><td>Notifications (deliverable 5). This mostly helps latency, not throughput.</td></tr>
+        <tr><td>The model itself</td><td>When you want to test the queue, the model hides everything else.</td><td>Swap in a <b>stub model</b> (sleep 10 ms, return a fake answer) to measure just the plumbing. Then benchmark the model by itself.</td></tr>
+        <tr><td>The test client</td><td>Same laptop as the servers, one Python process.</td><td>Watch its CPU. For more load, run the generator on another machine or use a load tool (section 5).</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">The habit: <b>change one thing, re-run, compare numbers.</b> Each fix moves the bottleneck somewhere else, and that's the point: you're learning where the limits are, one at a time.</p>
+</section>
+
+<section id="real">
+  <div class="eyebrow">5 · Closer to real customers</div>
+  <h2>Real load tests</h2>
+  <div class="two">
+    <ul class="panel plain">
+      <li><b>Real users don't arrive in a burst of 20.</b> They arrive at random times (a Poisson process), pause between requests ("think time"), and send different images of different sizes.</li>
+      <li><b>Different questions, different tests:</b> <em>load</em> (expected traffic, steady), <em>stress</em> (ramp up until it breaks; where's the knee?), <em>spike</em> (sudden 10× jump), <em>soak</em> (hours at normal load to find leaks and slow growth).</li>
+      <li><b>Fixed rate vs. fixed users.</b> 20 users who each wait for an answer send less when the server slows down, which hides the problem. A fixed <em>arrival rate</em> keeps sending, like real customers do, and shows the backlog honestly.</li>
+      <li><b>Report percentiles, not averages:</b> p50, p95, p99 latency, error rate and throughput, against a goal such as "95% of requests under 3 seconds at 30 req/s."</li>
+      <li><b>Run the load from somewhere else</b> (another machine or the cloud), and watch the server's queue length, memory and CPU at the same time.</li>
+    </ul>
+    <div style="display:grid;gap:14px">
+<pre class="code"><span class="c"># locustfile.py  —  pip install locust ; locust -f locustfile.py</span>
+import random, pathlib
+from locust import HttpUser, task, between
+
+IMAGES = [p.read_bytes() for p in pathlib.Path("test_images").glob("*.jpg")]
+
+class Customer(HttpUser):
+    wait_time = between(1, 5)          <span class="c"># think time</span>
+
+    @task
+    def predict(self):
+        with self.client.post("/predict", files={"image": random.choice(IMAGES)},
+                              timeout=30, catch_response=True) as r:
+            if r.status_code != 200 or not r.json().get("success"):
+                r.failure("no prediction")</pre>
+<pre class="code"><span class="c">// k6: a fixed arrival rate, with a pass/fail goal</span>
+export const options = {
+  scenarios: { steady: { executor: "constant-arrival-rate",
+    rate: 30, timeUnit: "1s", duration: "5m", preAllocatedVUs: 200 } },
+  thresholds: { http_req_duration: ["p(95)&lt;3000"], http_req_failed: ["rate&lt;0.01"] },
+};</pre>
+    </div>
+  </div>
+  <p class="note">Locust (Python) gives a live web dashboard of users, requests per second and latency percentiles. Other common tools: k6, JMeter, and the quick command-line tools <code>hey</code> and <code>oha</code>.</p>
+</section>
+
+<section id="questions">
+  <div class="eyebrow">Think about it</div>
+  <h2>Questions</h2>
+  <ol class="panel plain">
+    <li>In the project as given, which stage is the bottleneck on your machine? How could you prove it with a measurement instead of a guess?</li>
+    <li>The free Redis holds about 37 jobs. If requests arrive faster than the worker finishes them, how many seconds until writes start failing?</li>
+    <li>Little's law: requests in the system = arrival rate × time each one spends there. At 20 req/s and 2 s per request, how many requests are in flight? How many open connections and threads is that?</li>
+    <li>Why might a test with 20 users who wait for each answer report better numbers than real traffic at the same average rate?</li>
+    <li>You added 4 workers and throughput didn't change. What does that tell you?</li>
+  </ol>
+</section>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const KNOBS = [
+  { k: "load", lbl: "Load you send (req/s)", opts: [[5, "5"], [20, "20"], [50, "50"], [200, "200"], [1000, "1,000"]] },
+  { k: "redis", lbl: "Redis", opts: [["cloud", "Free cloud (30 MB)"], ["local", "Local"]] },
+  { k: "payload", lbl: "Job payload", opts: [["f32", "float32 b64 0.8 MB"], ["u8", "uint8 b64 0.2 MB"], ["jpg", "JPEG 0.08 MB"]] },
+  { k: "workers", lbl: "Workers", opts: [[1, "1"], [4, "4"], [16, "16"]] },
+  { k: "web", lbl: "Web server", opts: [["dev", "Flask dev"], ["prod", "4 processes"]] },
+  { k: "model", lbl: "Model", opts: [["resnet", "ResNet50 (CPU)"], ["stub", "Stub (10 ms)"]] },
+];
+const PRESETS = {
+  default: { load: 20, redis: "cloud", payload: "f32", workers: 1, web: "dev", model: "resnet" },
+  local: { load: 20, redis: "local", payload: "f32", workers: 1, web: "dev", model: "resnet" },
+  small: { load: 20, redis: "local", payload: "jpg", workers: 1, web: "dev", model: "resnet" },
+  workers: { load: 50, redis: "local", payload: "jpg", workers: 4, web: "dev", model: "resnet" },
+  plumbing: { load: 1000, redis: "local", payload: "jpg", workers: 4, web: "prod", model: "stub" },
+};
+let S = { ...PRESETS.default };
+const MB = { f32: 0.8, u8: 0.2, jpg: 0.08 };
+
+// requests per second each stage can sustain
+function stages() {
+  const mb = MB[S.payload], cloud = S.redis === "cloud";
+  const up = cloud ? 2.5 : 400, down = cloud ? 12.5 : 400;           // MB/s: 20 Mbps up, 100 Mbps down; loopback
+  const prep = (S.payload === "jpg" ? 120 : 45) * (S.web === "prod" ? 4 : 1);   // resize + encode in the web process
+  const perWorker = S.model === "stub" ? 150 : 16;                    // stub: decode + a short sleep
+  const workerCPU = S.model === "stub" ? Infinity : 16 * 6;           // a laptop has ~6 cores for models
+  return [
+    { k: "client", name: "Test client", sub: "one Python process, threads", cap: 400 },
+    { k: "web", name: "Web front door", sub: S.web === "dev" ? "Flask dev server, preprocessing" : "4 processes, preprocessing", cap: prep },
+    { k: "up", name: "Upload to Redis", sub: cloud ? `${mb} MB per job over home internet` : `${mb} MB per job, same machine`, cap: up / mb },
+    { k: "redis", name: "Redis", sub: "commands per second", cap: cloud ? 1000 : 50000 },
+    { k: "down", name: "Worker download", sub: cloud ? "same bytes back down" : "same machine", cap: down / mb },
+    { k: "model", name: "Model", sub: S.model === "stub" ? `${S.workers} stub worker${S.workers > 1 ? "s" : ""}` : `${S.workers} × ResNet50 on CPU`, cap: Math.min(perWorker * S.workers, workerCPU) },
+  ];
+}
+const LOGMAX = 4;   // 10^4 on the axis
+const pct = v => Math.max(0.5, Math.min(100, 100 * Math.log10(Math.max(1, v)) / LOGMAX));
+const fmt = v => v >= 100 ? Math.round(v).toLocaleString("en-US") : v >= 10 ? v.toFixed(0) : v.toFixed(1);
+
+// knobs
+const knobs = $("knobs");
+KNOBS.forEach(kn => {
+  const d = document.createElement("div"); d.className = "knob";
+  d.innerHTML = `<span class="lbl">${kn.lbl}</span><div class="seg" role="group" aria-label="${kn.lbl}"></div>`;
+  const seg = d.querySelector(".seg");
+  kn.opts.forEach(([v, t]) => {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = t; b.dataset.v = v; b.dataset.k = kn.k;
+    b.onclick = () => { S[kn.k] = typeof kn.opts[0][0] === "number" ? +v : v; draw(); };
+    seg.appendChild(b);
+  });
+  knobs.appendChild(d);
+});
+document.querySelectorAll("[data-p]").forEach(b => b.onclick = () => { S = { ...PRESETS[b.dataset.p] }; draw(); });
+
+function draw() {
+  document.querySelectorAll(".seg button").forEach(b => b.setAttribute("aria-pressed", String(S[b.dataset.k]) === b.dataset.v));
+  const st = stages(), neck = st.reduce((a, b) => b.cap < a.cap ? b : a);
+  const thru = Math.min(S.load, neck.cap);
+  $("stages").innerHTML = st.map(s => `<div class="stage${s === neck ? " neck" : ""}">
+      <div class="name">${s.name}<small>${s.sub}</small></div>
+      <div class="track"><div class="fill" style="width:${pct(s.cap)}%"></div><div class="loadmark" style="left:calc(${pct(S.load)}% - 1px)"></div></div>
+      <div class="val">${fmt(s.cap)}/s</div></div>`).join("");
+  const short = Math.max(0, S.load - neck.cap), isClient = neck.k === "client";
+  const backlog = isClient ? 0 : short;
+  const mb = MB[S.payload], capJobs = S.redis === "cloud" ? Math.floor(30 / mb) : Infinity;
+  // backlog sits in Redis when the slow stage is after the upload
+  const queuedInRedis = ["down", "model"].includes(neck.k) && backlog > 0;
+  const fullIn = queuedInRedis && isFinite(capJobs) ? capJobs / backlog : null;
+  $("out").innerHTML = `
+    <div class="stat"><div class="n">${fmt(thru)}</div><div class="t">requests answered per second</div></div>
+    <div class="stat ${short ? "bad" : ""}"><div class="n">${isClient && short ? "−" + fmt(short) : backlog ? "+" + fmt(backlog) : "0"}</div><div class="t">${isClient && short ? "requests per second never sent" : "backlog growth per second"}</div></div>
+    <div class="stat"><div class="n">${neck.name}</div><div class="t">bottleneck</div></div>
+    <div class="stat ${fullIn !== null ? "bad" : ""}"><div class="n">${fullIn !== null ? fullIn.toFixed(0) + " s" : isFinite(capJobs) ? capJobs + " jobs" : "GBs"}</div><div class="t">${fullIn !== null ? "until the free 30 MB Redis is full" : "Redis room for waiting jobs"}</div></div>`;
+  $("verdict").className = "verdict" + (short ? "" : " ok");
+  $("verdict").innerHTML = !short
+    ? `Everything keeps up with ${fmt(S.load)} req/s. The tightest stage is <b>${neck.name}</b> at ${fmt(neck.cap)} req/s; push the load past that to find the limit.`
+    : isClient
+    ? `You asked for ${fmt(S.load)} req/s, but one Python process can only send about ${fmt(neck.cap)}. The server never sees the rest, so it looks fine. Your test is measuring <b>the test client</b>: use more processes, another machine, or a load tool.`
+    : `You send ${fmt(S.load)} req/s, but <b>${neck.name}</b> handles only ${fmt(neck.cap)}. The other stages sit partly idle, and requests pile up ${queuedInRedis ? "in Redis" : "in front of it"}. Your test is measuring <b>${neck.name}</b>.`;
+}
+
+draw();
+})();
+</script>
+</body>
+</html>

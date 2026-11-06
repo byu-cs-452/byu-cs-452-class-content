@@ -155,6 +155,8 @@ p.close()
 - Fix it so threads are properly joined before the program terminates.
 - Explain how and what you did to fix it.
 
+<sub>Going further: what is this test really testing, and where is the bottleneck? See [Stress Testing the Queue](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/stress_testing.html).</sub>
+
 ### 7. Unified Logging
 - Implement a logging solution callable from any file.
 - Each log entry should be in a consistent format and include:
@@ -193,3 +195,4 @@ See it work:
 - [Reliable Redis Queue](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/reliable_queue.html): claim with LMOVE, acknowledge, and a reaper for jobs from crashed workers
 - [Pooling Redis Subscribers](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/subscriber_pooling.html): one subscriber connection per process, and connection limits on Linux, Windows and macOS
 - [Listening and Security](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/listening_and_security.html): the port is open, so why can't a stranger wreck the queue?
+- [Stress Testing the Queue](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/stress_testing.html): what the stress test really measures, finding the bottleneck, and realistic load tests
