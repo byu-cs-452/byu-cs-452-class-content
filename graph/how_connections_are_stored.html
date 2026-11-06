@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Connections Are Stored</title>
+<meta name="description" content="How SQL and graph databases store a connection on disk, what ids they use, and what 1,000,000 connections cost in PostgreSQL vs Neo4j (measured).">
+<style>
+:root {
+  --bg: #fbfaf7; --surface: #ffffff; --ink: #1d1f24; --muted: #5d636e; --line: #dcd9d1;
+  --sql: #2f6db5; --sql-2: #79a7dc; --sql-3: #b9d1ee; --sql-4: #dde8f6;
+  --graph: #2e8b57; --graph-2: #a8d5b9;
+  --accent: #b5562f; --code-bg: #f1efe9; --note-bg: #fff6d6; --note-line: #e0b100;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171b; --surface: #1d2026; --ink: #e8e6e1; --muted: #a2a8b3; --line: #343842;
+    --sql: #6ea3e6; --sql-2: #4b7fc0; --sql-3: #345d91; --sql-4: #26405f;
+    --graph: #5cc28a; --graph-2: #2f6f4b;
+    --accent: #e08a62; --code-bg: #262a31; --note-bg: #322b12; --note-line: #b08a00;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171b; --surface: #1d2026; --ink: #e8e6e1; --muted: #a2a8b3; --line: #343842;
+  --sql: #6ea3e6; --sql-2: #4b7fc0; --sql-3: #345d91; --sql-4: #26405f;
+  --graph: #5cc28a; --graph-2: #2f6f4b;
+  --accent: #e08a62; --code-bg: #262a31; --note-bg: #322b12; --note-line: #b08a00;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 2.1rem; line-height: 1.2; margin: 8px 0 8px; letter-spacing: -0.01em; }
+h2 { font-size: 1.45rem; margin: 48px 0 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+h3 { font-size: 1.1rem; margin: 28px 0 8px; }
+p, li { color: var(--ink); }
+.lede { font-size: 1.15rem; color: var(--muted); margin-top: 0; }
+.credit { font-size: 0.85rem; color: var(--muted); font-style: italic; }
+code { font: 0.9em ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--code-bg);
+  padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code-bg); padding: 14px 16px; border-radius: 8px; overflow-x: auto;
+  font: 0.86rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+pre code { background: none; padding: 0; }
+.sql { color: var(--sql); font-weight: 600; }
+.graph { color: var(--graph); font-weight: 600; }
+.note { background: var(--note-bg); border-left: 4px solid var(--note-line); padding: 10px 14px;
+  border-radius: 4px; margin: 16px 0; }
+figure { margin: 20px 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 16px; }
+figcaption { font-size: 0.88rem; color: var(--muted); margin-top: 10px; }
+svg { width: 100%; height: auto; display: block; }
+svg text { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; fill: var(--ink); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 640px) { .two { grid-template-columns: 1fr; } h1 { font-size: 1.7rem; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+.card h3 { margin-top: 4px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
+.tablewrap { overflow-x: auto; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 0.85rem; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.total td { font-weight: 700; }
+/* bar chart */
+.bars { display: grid; gap: 14px; }
+.bar-row .label { display: flex; justify-content: space-between; gap: 10px; font-size: 0.92rem; margin-bottom: 4px; }
+.bar-row .label b { font-variant-numeric: tabular-nums; }
+.track { display: flex; height: 26px; background: var(--code-bg); border-radius: 5px; overflow: hidden; }
+.seg { height: 100%; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.82rem; color: var(--muted); margin-top: 12px; }
+.legend span::before { content: ""; display: inline-block; width: 11px; height: 11px; border-radius: 2px;
+  margin-right: 6px; vertical-align: -1px; background: var(--c); }
+.big { font-size: 2rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.stat { text-align: center; }
+.stat .sub { font-size: 0.85rem; color: var(--muted); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+@media (max-width: 560px) { .stats { grid-template-columns: 1fr; } }
+a { color: var(--sql); }
+</style>
+</head>
+<body>
+<main>
+<p class="credit">[Page created using Claude by Professor Reynolds]</p>
+<h1>How connections are stored</h1>
+<p class="lede">Paper A cites paper B. Where does that fact actually live on disk, in a SQL database and in a
+graph database? And what do 1,000,000 of them cost?</p>
+
+<div class="stats">
+  <div class="card stat"><div class="big graph">34 B</div><div class="sub">per connection in Neo4j</div></div>
+  <div class="card stat"><div class="big sql">85 B</div><div class="sub">PostgreSQL, BIGINT ids, both directions indexed</div></div>
+  <div class="card stat"><div class="big sql">136 B</div><div class="sub">PostgreSQL, UUID ids</div></div>
+</div>
+
+<h2>1. In SQL, a connection is a row with two ids</h2>
+<p>A relational database has no "connection" object. A many-to-many connection is a row in a
+<b>junction table</b> that holds the id of each side. The database finds the other side by
+<b>looking that id up</b>, usually in a B-tree index.</p>
+
+<figure>
+<svg viewBox="0 0 700 330" role="img" aria-label="SQL: papers table, cites junction table, and B-tree index">
+  <!-- papers table -->
+  <text x="20" y="24" font-size="14" font-weight="700">papers</text>
+  <rect x="20" y="34" width="150" height="26" fill="var(--sql)" rx="3"/>
+  <text x="32" y="52" font-size="13" style="fill:#fff">id (BIGINT)</text>
+  <g font-size="13">
+    <rect x="20" y="60" width="150" height="26" fill="var(--surface)" stroke="var(--line)"/><text x="32" y="78">41</text>
+    <rect x="20" y="86" width="150" height="26" fill="var(--sql-4)" stroke="var(--line)"/><text x="32" y="104">42</text>
+    <rect x="20" y="112" width="150" height="26" fill="var(--surface)" stroke="var(--line)"/><text x="32" y="130">43</text>
+    <rect x="20" y="138" width="150" height="26" fill="var(--surface)" stroke="var(--line)"/><text x="32" y="156">…</text>
+  </g>
+  <!-- cites table -->
+  <text x="270" y="24" font-size="14" font-weight="700">cites (junction table)</text>
+  <rect x="270" y="34" width="210" height="26" fill="var(--sql)" rx="3"/>
+  <text x="282" y="52" font-size="13" style="fill:#fff">citing_id</text><text x="385" y="52" font-size="13" style="fill:#fff">cited_id</text>
+  <g font-size="13">
+    <rect x="270" y="60" width="210" height="26" fill="var(--sql-4)" stroke="var(--line)"/><text x="282" y="78">42</text><text x="385" y="78">7</text>
+    <rect x="270" y="86" width="210" height="26" fill="var(--sql-4)" stroke="var(--line)"/><text x="282" y="104">42</text><text x="385" y="104">9981</text>
+    <rect x="270" y="112" width="210" height="26" fill="var(--surface)" stroke="var(--line)"/><text x="282" y="130">43</text><text x="385" y="130">7</text>
+    <rect x="270" y="138" width="210" height="26" fill="var(--surface)" stroke="var(--line)"/><text x="282" y="156">…</text><text x="385" y="156">…</text>
+  </g>
+  <text x="270" y="186" font-size="12" style="fill:var(--muted)">each row ≈ 24 B header + 8 + 8 + 4 B pointer = 44 B</text>
+  <!-- arrow table to papers -->
+  <path d="M270 73 C 220 73, 220 99, 172 99" fill="none" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah)"/>
+  <text x="196" y="66" font-size="11" style="fill:var(--accent)">look up</text>
+  <!-- B-tree -->
+  <text x="20" y="222" font-size="14" font-weight="700">B-tree index on (citing_id, cited_id)</text>
+  <rect x="300" y="236" width="100" height="26" fill="var(--sql-3)" stroke="var(--sql)" rx="3"/><text x="318" y="254" font-size="12">root</text>
+  <rect x="150" y="290" width="110" height="26" fill="var(--sql-4)" stroke="var(--sql)" rx="3"/><text x="160" y="308" font-size="12">… 41,42 …</text>
+  <rect x="295" y="290" width="110" height="26" fill="var(--sql-4)" stroke="var(--sql)" rx="3"/><text x="305" y="308" font-size="12">… 43,7 …</text>
+  <rect x="440" y="290" width="110" height="26" fill="var(--sql-4)" stroke="var(--sql)" rx="3"/><text x="450" y="308" font-size="12">… 99,12 …</text>
+  <line x1="350" y1="262" x2="205" y2="290" stroke="var(--accent)" stroke-width="2"/>
+  <line x1="350" y1="262" x2="350" y2="290" stroke="var(--sql)" stroke-width="1"/>
+  <line x1="350" y1="262" x2="495" y2="290" stroke="var(--sql)" stroke-width="1"/>
+  <text x="560" y="254" font-size="11" style="fill:var(--accent)">"what does 42 cite?"</text>
+  <text x="560" y="270" font-size="11" style="fill:var(--accent)">walk root → leaf:</text>
+  <text x="560" y="286" font-size="11" style="fill:var(--accent)">O(log n) per hop</text>
+  <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--accent)"/></marker></defs>
+</svg>
+<figcaption>Following a connection in SQL means searching an index. "What does 42 cite?" uses the
+primary key index on <code>(citing_id, cited_id)</code>. "Who cites 7?" needs a <i>second</i> index on
+<code>cited_id</code>, or Postgres scans the whole table.</figcaption>
+</figure>
+
+<h2>2. In a graph database, a connection is a record with pointers</h2>
+<p>Neo4j (Community edition's default <code>record-aligned</code> format) stores every node and every
+relationship as a <b>fixed-size record</b> in its own file. Because every record is the same size, a
+record's id is simply its <b>slot number</b>: relationship 1,000 starts at byte 1,000 × 34. Finding it takes
+arithmetic, not a search.</p>
+
+<figure>
+<svg viewBox="0 0 700 300" role="img" aria-label="Neo4j node record of 15 bytes and relationship record of 34 bytes">
+  <text x="10" y="22" font-size="14" font-weight="700">node record: 15 bytes</text>
+  <g font-size="11">
+    <rect x="10" y="32" width="28" height="34" fill="var(--graph-2)" stroke="var(--graph)"/><text x="16" y="54">1</text>
+    <rect x="38" y="32" width="112" height="34" fill="var(--graph)" stroke="var(--graph)"/><text x="48" y="54" style="fill:#fff">first rel → (4)</text>
+    <rect x="150" y="32" width="112" height="34" fill="var(--graph-2)" stroke="var(--graph)"/><text x="160" y="54">first prop (4)</text>
+    <rect x="262" y="32" width="140" height="34" fill="var(--graph-2)" stroke="var(--graph)"/><text x="276" y="54">labels (5)</text>
+    <rect x="402" y="32" width="28" height="34" fill="var(--graph-2)" stroke="var(--graph)"/><text x="408" y="54">1</text>
+  </g>
+  <text x="440" y="54" font-size="11" style="fill:var(--muted)">in-use flag … dense flag</text>
+
+  <text x="10" y="104" font-size="14" font-weight="700">relationship record: 34 bytes</text>
+  <g font-size="10">
+    <rect x="10" y="114" width="20" height="40" fill="var(--graph-2)" stroke="var(--graph)"/><text x="16" y="138">1</text>
+    <rect x="30" y="114" width="76" height="40" fill="var(--graph)" stroke="var(--graph)"/><text x="36" y="132" style="fill:#fff">start node</text><text x="58" y="146" style="fill:#fff">4</text>
+    <rect x="106" y="114" width="76" height="40" fill="var(--graph)" stroke="var(--graph)"/><text x="114" y="132" style="fill:#fff">end node</text><text x="134" y="146" style="fill:#fff">4</text>
+    <rect x="182" y="114" width="76" height="40" fill="var(--graph-2)" stroke="var(--graph)"/><text x="196" y="132">type</text><text x="210" y="146">4</text>
+    <rect x="258" y="114" width="76" height="40" fill="var(--graph-2)" stroke="var(--graph)"/><text x="264" y="132">start prev</text><text x="286" y="146">4</text>
+    <rect x="334" y="114" width="76" height="40" fill="var(--graph-2)" stroke="var(--graph)"/><text x="340" y="132">start next</text><text x="362" y="146">4</text>
+    <rect x="410" y="114" width="76" height="40" fill="var(--graph-2)" stroke="var(--graph)"/><text x="420" y="132">end prev</text><text x="438" y="146">4</text>
+    <rect x="486" y="114" width="76" height="40" fill="var(--graph-2)" stroke="var(--graph)"/><text x="496" y="132">end next</text><text x="514" y="146">4</text>
+    <rect x="562" y="114" width="76" height="40" fill="var(--graph-2)" stroke="var(--graph)"/><text x="572" y="132">first prop</text><text x="590" y="146">4</text>
+    <rect x="638" y="114" width="20" height="40" fill="var(--graph-2)" stroke="var(--graph)"/><text x="644" y="138">1</text>
+  </g>
+
+  <text x="10" y="196" font-size="14" font-weight="700">each node's relationships form a linked list</text>
+  <g font-size="12">
+    <circle cx="60" cy="250" r="26" fill="var(--graph)"/><text x="44" y="255" style="fill:#fff">P42</text>
+    <rect x="140" y="232" width="120" height="36" rx="5" fill="var(--graph-2)" stroke="var(--graph)"/><text x="150" y="255">rel 420 → P7</text>
+    <rect x="320" y="232" width="120" height="36" rx="5" fill="var(--graph-2)" stroke="var(--graph)"/><text x="326" y="255">rel 421 → P9981</text>
+    <rect x="500" y="232" width="120" height="36" rx="5" fill="var(--graph-2)" stroke="var(--graph)"/><text x="508" y="255">rel 422 → …</text>
+  </g>
+  <path d="M86 250 L136 250" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah2)"/>
+  <path d="M260 244 L316 244" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah2)"/>
+  <path d="M440 244 L496 244" stroke="var(--accent)" stroke-width="2" marker-end="url(#ah2)"/>
+  <path d="M316 258 L264 258" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah3)"/>
+  <path d="M496 258 L444 258" stroke="var(--muted)" stroke-width="1.5" marker-end="url(#ah3)"/>
+  <text x="140" y="290" font-size="11" style="fill:var(--accent)">next pointers (prev pointers in gray): jump to byte id × 34, no search</text>
+  <defs>
+    <marker id="ah2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--accent)"/></marker>
+    <marker id="ah3" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="var(--muted)"/></marker>
+  </defs>
+</svg>
+<figcaption>Byte counts are approximate field widths. The 1-byte ends hold the in-use flag and the
+high bits of the ids, so ids are about 35 bits, not 32. One relationship record sits in <b>two</b>
+linked lists, the start node's and the end node's, so both directions come for free with no extra
+index. This is what Neo4j calls <b>index-free adjacency</b>.</figcaption>
+</figure>
+
+<h2>3. What ids do they use?</h2>
+<p>Most SQL tables use an <b>auto-incrementing integer</b>. Neo4j also hands out integer ids, but they mean
+something different.</p>
+<div class="tablewrap">
+<table>
+<tr><th>Id scheme</th><th>What it is</th><th class="num">Size</th><th>Gotcha</th></tr>
+<tr><td class="sql">SQL BIGINT identity / serial</td><td>A counter: 1, 2, 3, … Stored in the row and in every index entry.</td><td class="num">8 B</td><td>Guessable; needs one central counter.</td></tr>
+<tr><td class="sql">SQL UUID</td><td>128-bit random id, generated anywhere without coordination.</td><td class="num">16 B</td><td>Twice the bytes in every row <i>and</i> index; random order spreads B-tree inserts across the whole index.</td></tr>
+<tr><td class="graph">Neo4j internal id</td><td>The record's <b>slot number</b> in the store file. Byte offset = id × record size.</td><td class="num">~35 bits</td><td><b>Reused after deletes.</b> Never put it in a URL or another system. Neo4j 5 exposes it as <code>elementId()</code>.</td></tr>
+<tr><td class="graph">Your own key on a node</td><td>A property such as <code>paperId</code> or a UUID, with an index on it.</td><td class="num">property + index</td><td>This is the id the outside world should use; the slot id is for the engine.</td></tr>
+</table>
+</div>
+<p>Other graph databases differ. Amazon Neptune, for example, uses string ids that you supply or it
+generates. The idea is the same everywhere, though: the engine connects records with its own
+internal addresses, and you keep a stable business key for the outside world.</p>
+
+<h2>4. 1,000,000 connections, measured</h2>
+<p>We loaded the same data into both databases: <b>100,000 papers</b>, each citing 10 others, for
+<b>1,000,000 citations</b>. Postgres got a primary key on <code>(citing_id, cited_id)</code> plus an index on
+<code>cited_id</code>, so both directions are fast like in Neo4j.</p>
+
+<figure>
+<div class="bars">
+  <div class="bar-row">
+    <div class="label"><span class="graph">Neo4j 5.26 (record-aligned)</span><b>36.4 MB</b></div>
+    <div class="track">
+      <div class="seg" style="width:23.6%;background:var(--graph)" title="relationship store 34.1 MB"></div>
+      <div class="seg" style="width:1.5%;background:var(--graph-2)" title="nodes + label index 2.2 MB"></div>
+    </div>
+  </div>
+  <div class="bar-row">
+    <div class="label"><span class="sql">PostgreSQL 16, BIGINT ids</span><b>91.3 MB</b></div>
+    <div class="track">
+      <div class="seg" style="width:30.6%;background:var(--sql)" title="cites table 44.3 MB"></div>
+      <div class="seg" style="width:21.9%;background:var(--sql-2)" title="primary key index 31.6 MB"></div>
+      <div class="seg" style="width:6.6%;background:var(--sql-3)" title="cited_id index 9.5 MB"></div>
+      <div class="seg" style="width:4.1%;background:var(--sql-4)" title="papers table + index 5.9 MB"></div>
+    </div>
+  </div>
+  <div class="bar-row">
+    <div class="label"><span class="sql">PostgreSQL 16, UUID ids</span><b>144.7 MB</b></div>
+    <div class="track">
+      <div class="seg" style="width:41.6%;background:var(--sql)" title="cites table 60.2 MB"></div>
+      <div class="seg" style="width:45.1%;background:var(--sql-2)" title="primary key index 65.3 MB"></div>
+      <div class="seg" style="width:7.1%;background:var(--sql-3)" title="cited_id index 10.3 MB"></div>
+      <div class="seg" style="width:6.1%;background:var(--sql-4)" title="papers table + index 8.9 MB"></div>
+    </div>
+  </div>
+</div>
+<div class="legend">
+  <span style="--c:var(--graph)">Neo4j relationships</span>
+  <span style="--c:var(--graph-2)">Neo4j nodes + label index</span>
+  <span style="--c:var(--sql)">junction table rows</span>
+  <span style="--c:var(--sql-2)">primary key index</span>
+  <span style="--c:var(--sql-3)">reverse (cited_id) index</span>
+  <span style="--c:var(--sql-4)">papers table + its index</span>
+</div>
+<figcaption>Measured 2026-11-06 with PostgreSQL 16.15 (<code>pg_relation_size</code>) and Neo4j 5.26
+Community (store file sizes after shutdown, preallocation off). MB = 1,000,000 bytes. Transaction logs and
+WAL are not counted.</figcaption>
+</figure>
+
+<div class="tablewrap">
+<table>
+<tr><th>Just the connections</th><th class="num">Bytes</th><th class="num">Per connection</th></tr>
+<tr><td class="graph">Neo4j relationship store</td><td class="num">34,136,064</td><td class="num">34.1 B</td></tr>
+<tr><td class="sql">Postgres BIGINT: table</td><td class="num">44,285,952</td><td class="num">44.3 B</td></tr>
+<tr><td class="sql">Postgres BIGINT: primary key index</td><td class="num">31,645,696</td><td class="num">31.6 B</td></tr>
+<tr><td class="sql">Postgres BIGINT: cited_id index</td><td class="num">9,478,144</td><td class="num">9.5 B</td></tr>
+<tr class="total"><td class="sql">Postgres BIGINT total</td><td class="num">85,409,792</td><td class="num">85.4 B</td></tr>
+<tr class="total"><td class="sql">Postgres UUID total</td><td class="num">135,815,168</td><td class="num">135.8 B</td></tr>
+</table>
+</div>
+
+<h3>Where the bytes go</h3>
+<div class="two">
+  <div class="card">
+    <h3 class="sql">PostgreSQL row: 44 B</h3>
+    <ul>
+      <li><b>24 B</b> row header (23, padded). It holds the transaction ids that let readers and writers
+        work at the same time (MVCC).</li>
+      <li><b>16 B</b> data: two 8-byte ids.</li>
+      <li><b>4 B</b> pointer to the row in its page.</li>
+    </ul>
+    <p>Then each index stores the ids <i>again</i>, plus a pointer back to the row. The <code>cited_id</code>
+      index is small (9.5 B) because Postgres de-duplicates repeated keys: each paper is cited ~10 times.</p>
+  </div>
+  <div class="card">
+    <h3 class="graph">Neo4j relationship: 34 B</h3>
+    <ul>
+      <li>Both node ids, the type, four chain pointers and a property pointer, all in one record.</li>
+      <li>No separate index: the node record points to its first relationship, and the chain does the rest.</li>
+      <li>Records are aligned to 8 KB pages (240 per page), so 1,000,000 records = 4,167 pages = 34,136,064 bytes,
+        exactly what we measured.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="note"><b>Fair-comparison notes.</b> These are bare connections with no properties. Give each
+citation a <code>year</code> and Neo4j adds a record in its property store, while Postgres just widens the
+row. Postgres with 4-byte <code>INT</code> ids shrinks too. Neo4j Enterprise also has a newer <b>block</b>
+format that packs a node and its relationships into the same block. The big picture holds anyway: a graph
+database spends its bytes on <i>pointers</i>, and a relational database spends them on <i>ids plus indexes
+to find those ids</i>.</div>
+
+<h2>5. What it costs to follow a connection</h2>
+<p>Storage is only half the story. The real difference shows up when you <b>follow</b> connections several hops
+deep: "papers cited by papers cited by paper 42".</p>
+<div class="two">
+<div>
+<pre><code><span class="sql">-- SQL: one join (index search) per hop</span>
+SELECT count(*)
+FROM cites c1
+JOIN cites c2 ON c2.citing_id = c1.cited_id
+JOIN cites c3 ON c3.citing_id = c2.cited_id
+WHERE c1.citing_id = 42;</code></pre>
+</div>
+<div>
+<pre><code><span class="graph">// Cypher: follow pointers</span>
+MATCH (p:Paper {paperId: 42})
+      -[:CITES*3]->(x)
+RETURN count(x);</code></pre>
+</div>
+</div>
+<ul>
+  <li><span class="sql">SQL</span>: every hop searches a B-tree, <b>O(log n)</b> per lookup. With 1M rows that's
+    about 3–4 page reads per lookup, repeated for every row at every hop. The cost grows with the size of
+    the <i>whole table</i>.</li>
+  <li><span class="graph">Graph</span>: every hop reads a pointer and jumps to <code>id × 34</code>, <b>O(1)</b> per
+    relationship. The cost grows with the part of the graph you <i>actually touch</i>, not the total size.</li>
+  <li>For one hop, or for "count citations per year across everything", SQL is excellent and often faster.
+    For deep or variable-length paths (<code>*1..6</code>), shortest paths and recommendations, the graph
+    layout wins.</li>
+</ul>
+
+<h2>6. Questions to think about</h2>
+<ol>
+  <li>Neo4j didn't need a second index for "who cites paper 7?". Which fields in the 34-byte record make that possible?</li>
+  <li>Why is the Postgres primary key index almost as big as the table itself?</li>
+  <li>Why would it be a bug to store a Neo4j internal id in another database or in a URL?</li>
+  <li>Switching from BIGINT to UUID added about 50 MB. Where did those bytes go?</li>
+  <li>Your Neo4j project's data: would it be smaller or larger in Postgres? What would the junction tables be?</li>
+</ol>
+
+<h2>Try it yourself</h2>
+<p>Both scripts build the exact same 1,000,000 pairs, and each needs only Docker:</p>
+<ul>
+  <li><a href="measure_postgres.sql">measure_postgres.sql</a>: PostgreSQL, BIGINT and UUID versions, prints every table and index size.</li>
+  <li><a href="measure_neo4j.cypher">measure_neo4j.cypher</a>: Neo4j, with the commands to read the store file sizes.</li>
+</ul>
+<p>Change the ids to <code>INT</code>, drop the <code>cited_id</code> index, or add a property to every citation,
+and see what moves.</p>
+</main>
+</body>
+</html>
