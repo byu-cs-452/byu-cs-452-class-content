@@ -2,6 +2,8 @@
 
 Build a pipeline that (1) bulk-loads a large historical dataset and (2) automatically ingests new data from the same source on a regular cadence. The cadence is your call — hourly batch pulls are the well-trodden path, but faster, slower-but-justified, or full streaming are all fair game. The only hard rule: the stream can't be dead. Your pipeline must be visibly alive, with new data arriving on its own, no human pushing the button. You'll make a choice at each stage — your demo video is where you explain why.
 
+Looking for ideas or tools beyond this page? See [Ideas and Technologies to Explore](ideas_and_technologies.md).
+
 **Heads up:** a separate follow-up assignment checks whether your pipeline is *still* running one week later. Build like something that has to survive unattended, because it does.
 
 ## Stage 1: Data source
