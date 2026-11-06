@@ -64,6 +64,8 @@ python simple_request.py 
 
 (Make sure you run these in order, because simple_requst.py needs the servers to be up and running)
 
+> **Want to *see* what's in Redis?** The code cleans up right away, so the database usually looks empty. The web server deletes each result with `db.delete(k)` ([run_web_server.py](run_web_server.py), line 82), and the worker removes finished jobs with `db.ltrim(...)` ([run_model_server.py](run_model_server.py), line 79). Comment those lines out while you look around (Redis Insight or `KEYS *`), then put them back. Without the `ltrim`, the worker classifies the same images over and over.
+
 ---
 
 ## Deliverables (Include code, diagrams, and brief explanations in your PDF)
@@ -182,3 +184,12 @@ This is called a *two-phase commit* pattern: claim → process → acknowledge. 
 See it work:
 - [Reliable Redis Queue](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/reliable_queue.html): an animation of claim, crash, reaper and a dead-letter list.
 - [reliable_queue_example](../reliable_queue_example/): a small runnable version with a worker that crashes on purpose and a reaper that puts abandoned jobs back in the queue.
+
+---
+
+## Pages for this project
+
+- [Polling vs. Notifications](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/polling_vs_notifications.html): the work queue step by step, the second-worker bug, the cost of polling, notifications and an atomic pop
+- [Reliable Redis Queue](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/reliable_queue.html): claim with LMOVE, acknowledge, and a reaper for jobs from crashed workers
+- [Pooling Redis Subscribers](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/subscriber_pooling.html): one subscriber connection per process, and connection limits on Linux, Windows and macOS
+- [Listening and Security](https://byu-cs-452.github.io/byu-cs-452-class-content/redis/media/listening_and_security.html): the port is open, so why can't a stranger wreck the queue?

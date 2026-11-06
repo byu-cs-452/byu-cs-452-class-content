@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Listening and Security</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: header · 1 who's knocking (interactive layers) · 2 the layers table · 3 real attacks · 4 least privilege ACLs · 5 project checklist · questions */
+:root {
+  --bg: #f2f3f6; --surface: #ffffff; --ink: #161a22; --muted: #5a6373; --line: #d3d8e1;
+  --redis: #c8312a; --redis-bg: #fbeceb;
+  --data: #1f63c4; --data-bg: #e7effb;
+  --good: #0d7a50; --good-bg: #e1f4eb;
+  --bad: #b42318; --bad-bg: #fdeceb;
+  --warn: #a15c00; --warn-bg: #fdf1dc;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+    --redis: #f0605a; --redis-bg: #2c1716; --data: #74a9ff; --data-bg: #17253b;
+    --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+    --warn: #f0b04a; --warn-bg: #2e2412; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+  --redis: #f0605a; --redis-bg: #2c1716; --data: #74a9ff; --data-bg: #17253b;
+  --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+  --warn: #f0b04a; --warn-bg: #2e2412; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 17px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
+h1, h2, h3 { font-family: var(--f-display); letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(30px, 4.4vw, 48px); font-weight: 800; line-height: 1.05; }
+h1 .r { color: var(--redis); }
+h2 { font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; }
+h3 { font-size: 19px; font-weight: 600; }
+p { margin: 0; max-width: 74ch; }
+a { color: var(--data); }
+code, pre { font-family: var(--f-mono); font-size: 0.86em; }
+.credit { color: var(--muted); font-size: 13px; font-style: italic; }
+header { display: grid; gap: 12px; }
+nav.jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+nav.jump a { font-size: 14px; text-decoration: none; color: var(--ink); border: 1px solid var(--line); background: var(--surface); padding: 5px 12px; border-radius: 999px; }
+nav.jump a:hover, nav.jump a:focus-visible { border-color: var(--redis); outline: none; }
+section { margin-top: 46px; display: grid; gap: 14px; scroll-margin-top: 12px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--redis); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.diagram { overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.controls .lbl { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-right: 2px; }
+.controls button { font: inherit; font-size: 15px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.controls button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 700; }
+.controls button:focus-visible { outline: 2px solid var(--redis); outline-offset: 2px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; }
+.seg button + button { border-left: 1px solid var(--line); }
+.result { padding: 14px 16px; display: grid; gap: 6px; border-left: 6px solid var(--line); }
+.result.ok { border-left-color: var(--good); }
+.result.no { border-left-color: var(--bad); }
+.result.ouch { border-left-color: var(--bad); background: var(--bad-bg); }
+.result .k { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.result pre { margin: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; overflow-x: auto; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 820px; font-size: 15px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+th { font-family: var(--f-display); font-weight: 600; background: var(--bg); }
+td:first-child { font-weight: 700; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+ul.plain, ol.plain { margin: 0; padding: 16px 16px 16px 36px; display: grid; gap: 7px; }
+pre.code { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; overflow-x: auto; line-height: 1.5; }
+pre .c { color: var(--muted); }
+.note { font-size: 15px; color: var(--muted); }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 860px) { .two { grid-template-columns: minmax(0, 1fr); } }
+.callout { padding: 14px 16px; display: grid; gap: 6px; border-left: 5px solid var(--warn); }
+/* svg */
+svg text { font-family: var(--f-body); }
+.gate rect { fill: var(--surface); stroke: var(--line); stroke-width: 2; }
+.gate.pass rect { stroke: var(--good); fill: var(--good-bg); }
+.gate.block rect { stroke: var(--bad); fill: var(--bad-bg); stroke-width: 3; }
+.gate.skip rect { stroke-dasharray: 5 4; opacity: .55; }
+.gate .n { font-family: var(--f-mono); font-size: 11px; fill: var(--muted); }
+.gate .t { font-family: var(--f-display); font-weight: 600; font-size: 15px; fill: var(--ink); }
+.gate .q { font-size: 12px; fill: var(--muted); }
+.gate .v { font-family: var(--f-mono); font-size: 10.5px; font-weight: 600; }
+.gate.pass .v { fill: var(--good); } .gate.block .v { fill: var(--bad); } .gate.skip .v { fill: var(--warn); }
+.sender rect { fill: var(--surface); stroke: var(--ink); stroke-width: 2; }
+.redisbox rect { fill: var(--redis-bg); stroke: var(--redis); stroke-width: 2; }
+.redisbox text { fill: var(--redis); font-family: var(--f-display); font-weight: 600; }
+.track { stroke: var(--line); stroke-width: 3; stroke-dasharray: 2 6; stroke-linecap: round; }
+.pkt rect { fill: var(--data-bg); stroke: var(--data); stroke-width: 2; }
+.pkt text { font-family: var(--f-mono); font-size: 12px; fill: var(--data); font-weight: 600; text-anchor: middle; dominant-baseline: central; }
+.pkt.dead rect { fill: var(--bad-bg); stroke: var(--bad); } .pkt.dead text { fill: var(--bad); }
+.pkt.done rect { fill: var(--good-bg); stroke: var(--good); } .pkt.done text { fill: var(--good); }
+.x { font-family: var(--f-display); font-weight: 800; font-size: 30px; fill: var(--bad); text-anchor: middle; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="eyebrow">CS 452 · Redis · going further</div>
+  <h1>Listening and <span class="r">Security</span></h1>
+  <p>Redis listens on a port, and anyone who can reach that port can open a connection and send it bytes. That part is true. So why doesn't a stranger's message wreck the queue? Because <b>connecting is not the same as being obeyed</b>. Every message has to get through several layers, and each one asks a different question.</p>
+  <p class="credit">[Page created using Claude by Professor Reynolds]</p>
+  <nav class="jump" aria-label="Sections">
+    <a href="#knock">1 · Who's knocking?</a>
+    <a href="#layers">2 · The layers</a>
+    <a href="#attacks">3 · Real attacks</a>
+    <a href="#acl">4 · Least privilege</a>
+    <a href="#checklist">5 · Your project</a>
+    <a href="#questions">Questions</a>
+  </nav>
+</header>
+
+<section id="knock">
+  <div class="eyebrow">Animation · pick a sender</div>
+  <h2>Who's knocking, and which layer stops them?</h2>
+  <p>Choose a sender and a setup. The message travels left to right until a layer stops it. Try the same sender in both setups.</p>
+  <div class="controls">
+    <span class="lbl">Setup</span>
+    <div class="seg" role="group" aria-label="Setup">
+      <button type="button" id="m-class" aria-pressed="true">Class project (public endpoint)</button>
+      <button type="button" id="m-prod" aria-pressed="false">Production (private network)</button>
+    </div>
+  </div>
+  <div class="controls" id="senders"><span class="lbl">Sender</span></div>
+  <div class="panel diagram"><svg id="sv" viewBox="0 0 1100 250" role="img" aria-label="A message passes through network, encryption, authentication, permissions, limits and validation layers on its way to Redis and the worker"></svg></div>
+  <div class="panel result" id="result" aria-live="polite"></div>
+</section>
+
+<section id="layers">
+  <div class="eyebrow">Defense in depth</div>
+  <h2>Six questions every message has to answer</h2>
+  <div class="panel tablewrap">
+    <table>
+      <thead><tr><th>Layer</th><th>The question</th><th>How Redis and your project answer it</th><th>In production</th></tr></thead>
+      <tbody>
+        <tr><td>1 · Network</td><td>Can you even reach the port?</td><td>A redis.io free database has a public endpoint: anyone on the internet can reach it, so every other layer has to hold. Self-hosted Redis listens only on <code>127.0.0.1</code> by default, and <code>protected-mode</code> refuses outside connections when no password is set.</td><td>Redis sits in a private network (VPC). A firewall or security group lets in only the web and worker machines. Only the web front door is public.</td></tr>
+        <tr><td>2 · Encryption (TLS)</td><td>Can anyone on the way read or change it?</td><td>Without TLS, your password and every image cross the network in plain text. redis.io supports TLS; redis-py turns it on with <code>ssl=True</code>.</td><td>TLS everywhere, even inside the private network.</td></tr>
+        <tr><td>3 · Authentication</td><td>Who are you?</td><td>Every connection must send <code>AUTH</code> with the right password before any other command works. Otherwise: <code>NOAUTH Authentication required</code>.</td><td>Separate users per service, long random passwords from a secret manager, rotated.</td></tr>
+        <tr><td>4 · Authorization (ACL)</td><td>What are you allowed to do?</td><td>The <code>default</code> user can run every command on every key, including <code>FLUSHALL</code> and <code>CONFIG</code>. Redis 6 ACLs limit each user to certain commands, keys and pub/sub channels: <code>NOPERM</code>.</td><td>Least privilege: the web server can only push jobs; workers can only take jobs and write results.</td></tr>
+        <tr><td>5 · Limits</td><td>How much are you allowed to do?</td><td><code>maxclients</code>, timeouts, the largest allowed value, and output buffer limits stop a flood from taking Redis down.</td><td>Rate limits and upload size limits at the front door, before anything reaches Redis.</td></tr>
+        <tr><td>6 · Validation</td><td>Is the data safe to use?</td><td>The worker parses the job with <code>json.loads</code>, checks the fields and the image size, and only then decodes it. JSON is just data; it can't run code.</td><td>Never <code>pickle.loads</code> or <code>eval</code> data from a queue: a crafted pickle runs code on the worker. Treat every message as untrusted, even from your own queue.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="attacks">
+  <div class="eyebrow">This really happens</div>
+  <h2>What attackers do with an open Redis</h2>
+  <div class="two">
+    <div class="panel callout">
+      <h3>The classic: no password, port open</h3>
+      <p>Bots scan the whole internet for port 6379 all day. On a Redis with no password, an attacker can use <code>CONFIG SET dir</code> and <code>CONFIG SET dbfilename</code> to make Redis write its data file somewhere useful, like a user's <code>~/.ssh/authorized_keys</code> or a cron folder, and log in to the machine.</p>
+    </div>
+    <div class="panel callout">
+      <h3>Modern malware campaigns</h3>
+      <p>Security researchers have tracked malware built for exposed Redis servers. In 2023, Aqua Security described HeadCrab, which compromised over a thousand servers by making them replicas of an attacker's server and loading a malicious module. Unit 42 described P2PInfect, a worm that spread the same way. All of them start with a Redis that anyone could reach and run commands on.</p>
+    </div>
+  </div>
+  <p class="note">Each layer above breaks these attacks: a private network means the scanner never reaches the port, a password stops the commands, and ACLs keep even a logged-in user away from <code>CONFIG</code>, <code>REPLICAOF</code> and <code>MODULE</code>.</p>
+</section>
+
+<section id="acl">
+  <div class="eyebrow">Least privilege</div>
+  <h2>Give each program only the commands it needs</h2>
+  <p>With ACL users, a stolen web-server password can push jobs, and that's it. It can't wipe the database, read other keys or publish fake answers.</p>
+<pre class="code"><span class="c"># web front door: queue jobs, hear its own replies</span>
+ACL SETUSER web on &gt;&lt;long-random-password&gt; resetkeys resetchannels ~jobs:queue &amp;replies:* -@all +rpush +subscribe +ping
+
+<span class="c"># workers: take jobs, write results, publish replies</span>
+ACL SETUSER worker on &gt;&lt;another-password&gt; resetkeys resetchannels ~jobs:* ~result:* &amp;replies:* -@all +blmove +lrem +hset +hdel +hincrby +set +publish +ping
+
+<span class="c"># in Python, log in as that user over TLS</span>
+r = redis.Redis(host=HOST, port=PORT, username="web", password=os.environ["REDIS_PASSWORD"], ssl=True)
+
+<span class="c"># what an attacker with the web password sees</span>
+FLUSHALL                  <span class="c">→ (error) NOPERM ... has no permissions to run the 'flushall' command</span>
+GET result:7f3a…          <span class="c">→ (error) NOPERM ... has no permissions to run the 'get' command</span>
+PUBLISH replies:web1 …    <span class="c">→ (error) NOPERM ... has no permissions to run the 'publish' command</span></pre>
+  <p class="note"><code>~pattern</code> limits keys, <code>&amp;pattern</code> limits pub/sub channels, <code>+cmd</code> / <code>-@all</code> limit commands. Check who you are with <code>ACL WHOAMI</code> and what you can do with <code>ACL GETUSER web</code>.</p>
+</section>
+
+<section id="checklist">
+  <div class="eyebrow">For the work queue project</div>
+  <h2>Five things to fix in your own setup</h2>
+  <ol class="panel plain">
+    <li><b>Get the password out of <code>settings.py</code>.</b> Read it from an environment variable. A password committed to a public GitHub repo is found by bots within minutes.</li>
+    <li><b>Turn on TLS</b> (<code>ssl=True</code>) so the password and images aren't sent in plain text.</li>
+    <li><b>Make a <code>web</code> user and a <code>worker</code> user</b> with only the commands they need, instead of everyone using <code>default</code>.</li>
+    <li><b>Validate jobs in the worker:</b> parse JSON, check that <code>id</code> is a UUID and the image is the size you expect, and drop anything else.</li>
+    <li><b>Limit uploads at the front door</b> (Flask's <code>MAX_CONTENT_LENGTH</code>) so nobody can push a 2 GB "image" into Redis.</li>
+  </ol>
+</section>
+
+<section id="questions">
+  <div class="eyebrow">Think about it</div>
+  <h2>Questions</h2>
+  <ol class="panel plain">
+    <li>The port is open, the password is strong. What can a stranger still do to your Redis, and which layer handles it?</li>
+    <li>Why is it safer for only the web front door to be public, and for Redis and the workers to have no public address at all?</li>
+    <li>If someone steals the worker's password, what's the worst they can do with the ACL above? How would you notice?</li>
+    <li>Why isn't "it's behind a firewall" enough on its own? (Think: one compromised machine inside the network.)</li>
+    <li>JSON vs. pickle for the job payload: why does the format of the data matter for security?</li>
+  </ol>
+</section>
+</div>
+
+<script>
+(() => {
+const NS = "http://www.w3.org/2000/svg";
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+const GATES = [
+  { k: "net", t: "Network", q: "can you reach it?" },
+  { k: "tls", t: "TLS", q: "can anyone read it?" },
+  { k: "auth", t: "AUTH", q: "who are you?" },
+  { k: "acl", t: "ACL", q: "may you do this?" },
+  { k: "lim", t: "Limits", q: "how much?" },
+  { k: "val", t: "Validation", q: "is the data safe?" },
+];
+// verdict(mode) for each gate: [state, short label]; "block" stops the message, "skip" = layer isn't set up
+const SENDERS = [
+  { k: "web", label: "Your web server", msg: "RPUSH jobs:queue {id, image}",
+    gates: m => ({ net: ["pass", "allowed host"], tls: ["pass", "encrypted"], auth: ["pass", m === "class" ? "default user" : "user web"], acl: ["pass", "rpush allowed"], lim: ["pass", "normal size"], val: ["pass", "valid job"] }),
+    out: m => ({ cls: "ok", title: "Delivered: the job is queued and a worker classifies it.", text: "This is the path every message is supposed to take. Each layer checked something different and found nothing wrong." }) },
+  { k: "scan", label: "Internet scanner bot", msg: "CONFIG SET dir /root/.ssh",
+    gates: m => m === "prod" ? ({ net: ["block", "no route"] })
+      : ({ net: ["pass", "public endpoint"], tls: ["pass", "not needed"], auth: ["block", "NOAUTH"] }),
+    out: m => m === "prod"
+      ? { cls: "no", title: "Stopped at the network: the bot can't even reach port 6379.", text: "Redis has no public address. The scanner's connection attempt times out, and it moves on to the next IP.", err: "connect to 10.0.3.7:6379: connection timed out" }
+      : { cls: "no", title: "Stopped at AUTH: the bot connected, but Redis won't run any command without the password.", text: "The public endpoint means the bot really did open a connection. Without a password, this is the classic attack: it would have rewritten your SSH keys.", err: "(error) NOAUTH Authentication required." } },
+  { k: "sniff", label: "Eavesdropper on café Wi-Fi", msg: "reads your traffic",
+    gates: m => ({ net: ["pass", "same network"], tls: ["block", "sees noise"] }),
+    out: m => ({ cls: "no", title: "Stopped by TLS: the eavesdropper sees only encrypted bytes.", text: "Without TLS, the AUTH command and your password cross the network in plain text, and so does every image. With TLS, what they capture is useless.", err: "16 03 03 00 5a 02 00 00 56 03 03 9f e1 …" }) },
+  { k: "leak", label: "Someone with your leaked password", msg: "FLUSHALL",
+    gates: m => m === "prod" ? ({ net: ["block", "no route"] })
+      : ({ net: ["pass", "public endpoint"], tls: ["pass", "encrypted"], auth: ["pass", "password works"], acl: ["skip", "default: all OK"], lim: ["pass", "small command"], val: ["skip", "not reached"] }),
+    out: m => m === "prod"
+      ? { cls: "no", title: "Stopped at the network: the password alone isn't enough.", text: "The password leaked (say, in settings.py on GitHub), but the attacker isn't inside the private network, so there's nothing to log in to. With ACL users it would also have failed: the web user can't run FLUSHALL.", err: "connect to 10.0.3.7:6379: connection timed out" }
+      : { cls: "ouch", title: "It worked. Every key in your database is gone.", text: "On the class setup everyone logs in as the default user, which can run every command. A leaked password is the whole database. ACL users (section 4) would have answered NOPERM, and a private network would have stopped them at the start.", err: "OK" } },
+  { k: "big", label: "A user uploading a 2 GB \"image\"", msg: "POST /predict (2 GB)",
+    gates: m => ({ net: ["pass", "public website"], tls: ["pass", "encrypted"], auth: ["pass", "via web server"], acl: ["pass", "rpush allowed"], lim: ["block", "413 too large"] }),
+    out: m => ({ cls: "no", title: "Stopped by limits: the front door rejects it before it reaches Redis.", text: "Anyone can use the public website, so this one goes through your own web server with its real password. Only a size limit stops it. Without one, a few uploads like this fill Redis's memory and the queue stops for everyone.", err: "413 Request Entity Too Large" }) },
+  { k: "bad", label: "A crafted job payload", msg: "{\"id\": \"../../x\", \"image\": …}",
+    gates: m => ({ net: ["pass", "public website"], tls: ["pass", "encrypted"], auth: ["pass", "via web server"], acl: ["pass", "rpush allowed"], lim: ["pass", "normal size"], val: ["block", "bad id → dropped"] }),
+    out: m => ({ cls: "no", title: "Stopped by validation in the worker.", text: "It looked like a normal job all the way to the worker. The worker checks that the id is a UUID and the image has the expected shape before using either, and drops it. If the payload were a pickle and the worker called pickle.loads, it could have run the attacker's code instead.", err: "worker: rejected job: id is not a UUID" }) },
+];
+
+const sv = $("sv");
+const GX = 150, GW = 120, GAP = 16, GY = 70, GH = 150, PY = GY + 96;
+const gx = i => GX + i * (GW + GAP);
+const RX = gx(6) - 4;
+el("line", { class: "track", x1: 124, y1: PY, x2: RX + 40, y2: PY }, sv);
+const sg = el("g", { class: "sender" }, sv);
+el("rect", { x: 6, y: GY, width: 118, height: 76, rx: 10 }, sg);
+const sLines = [0, 1, 2].map(k => el("text", { x: 14, y: GY + 24 + k * 19, style: "font-family:var(--f-display);font-weight:600;font-size:13.5px;fill:var(--ink)" }, sg));
+const gates = GATES.map((g, i) => {
+  const G = el("g", { class: "gate" }, sv);
+  el("rect", { x: gx(i), y: GY, width: GW, height: GH, rx: 10 }, G);
+  el("text", { class: "n", x: gx(i) + 10, y: GY + 18 }, G).textContent = `layer ${i + 1}`;
+  el("text", { class: "t", x: gx(i) + 10, y: GY + 40 }, G).textContent = g.t;
+  el("text", { class: "q", x: gx(i) + 10, y: GY + 58 }, G).textContent = g.q;
+  const v = el("text", { class: "v", x: gx(i) + 8, y: GY + 138 }, G);
+  return { G, v };
+});
+const rb = el("g", { class: "redisbox" }, sv);
+el("rect", { x: RX, y: GY, width: 82, height: GH, rx: 10 }, rb);
+el("text", { x: RX + 12, y: GY + 28, style: "font-size:15px" }, rb).textContent = "Redis";
+el("text", { x: RX + 12, y: GY + 48, style: "font-size:13px" }, rb).textContent = "+ worker";
+el("text", { x: 10, y: 34, style: "font-family:var(--f-mono);font-size:12px;fill:var(--muted)" }, sv).textContent = "message:";
+const msgText = el("text", { x: 80, y: 34, style: "font-family:var(--f-mono);font-size:13px;font-weight:600;fill:var(--data)" }, sv);
+const pk = el("g", { class: "pkt" }, sv);
+el("rect", { x: -16, y: -16, width: 32, height: 32, rx: 7 }, pk);
+el("text", { x: 0, y: 0 }, pk).textContent = "✉";
+const xMark = el("text", { class: "x", x: 0, y: 0, visibility: "hidden" }, sv);
+xMark.textContent = "✗";
+
+let mode = "class", cur = SENDERS[0], gen = 0;
+const START = 137;
+function moveTo(x, ms) {
+  const g0 = gen;
+  const from = +pk.dataset.x || START, y = PY;
+  if (REDUCED || !ms) { pk.dataset.x = x; pk.setAttribute("transform", `translate(${x},${y})`); return Promise.resolve(); }
+  return new Promise(res => {
+    const s0 = performance.now();
+    const f = now => {
+      if (g0 !== gen) return res();
+      const p = Math.min(1, (now - s0) / ms), e = p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+      const xx = from + (x - from) * e; pk.dataset.x = xx; pk.setAttribute("transform", `translate(${xx},${y})`);
+      if (p < 1) requestAnimationFrame(f); else res();
+    };
+    requestAnimationFrame(f);
+  });
+}
+async function run() {
+  const g0 = ++gen;
+  const verdicts = cur.gates(mode), out = cur.out(mode);
+  const lines = [""]; cur.label.split(" ").forEach(w => { const l = lines.length - 1; if ((lines[l] + " " + w).trim().length > 13 && lines[l]) lines.push(w); else lines[l] = (lines[l] + " " + w).trim(); });
+  sLines.forEach((t, k) => t.textContent = lines[k] || "");
+  msgText.textContent = cur.msg;
+  gates.forEach(g => { g.G.setAttribute("class", "gate"); g.v.textContent = ""; });
+  pk.setAttribute("class", "pkt"); xMark.setAttribute("visibility", "hidden");
+  pk.dataset.x = START; await moveTo(START, 0);
+  $("result").className = "panel result"; $("result").innerHTML = `<span class="k">sending…</span>`;
+  let blocked = false;
+  for (let i = 0; i < GATES.length; i++) {
+    const v = verdicts[GATES[i].k];
+    if (!v) break;
+    await moveTo(gx(i) + GW / 2, 650); if (g0 !== gen) return;
+    gates[i].G.setAttribute("class", "gate " + v[0]); gates[i].v.textContent = (v[0] === "block" ? "✗ " : v[0] === "skip" ? "– " : "✓ ") + v[1];
+    if (v[0] === "block") {
+      blocked = true; pk.setAttribute("class", "pkt dead");
+      xMark.setAttribute("x", gx(i) + GW / 2); xMark.setAttribute("y", GY - 8); xMark.setAttribute("visibility", "visible");
+      break;
+    }
+    if (!REDUCED) await sleep(250); if (g0 !== gen) return;
+  }
+  if (!blocked) { await moveTo(RX + 41, 650); if (g0 !== gen) return; pk.setAttribute("class", out.cls === "ok" ? "pkt done" : "pkt dead"); }
+  $("result").className = "panel result " + out.cls;
+  $("result").innerHTML = `<h3>${out.title}</h3><p>${out.text}</p>` + (out.err ? `<pre>${out.err.replace(/</g, "&lt;")}</pre>` : "");
+}
+const bar = $("senders");
+SENDERS.forEach(s => {
+  const b = document.createElement("button"); b.type = "button"; b.textContent = s.label; b.setAttribute("aria-pressed", s === cur);
+  b.onclick = () => { cur = s; [...bar.querySelectorAll("button")].forEach(x => x.setAttribute("aria-pressed", x === b)); run(); };
+  bar.appendChild(b);
+});
+function setMode(m) { mode = m; $("m-class").setAttribute("aria-pressed", m === "class"); $("m-prod").setAttribute("aria-pressed", m === "prod"); run(); }
+$("m-class").onclick = () => setMode("class");
+$("m-prod").onclick = () => setMode("prod");
+run();
+})();
+</script>
+</body>
+</html>
