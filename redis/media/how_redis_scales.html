@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Redis Scales</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: header · 1 scale up first · 2 where a key lives (slot calculator) · 3 servers coming and going (cluster sim) · 4 MOVED vs ASK · 5 load balancing · 6 slots vs ring · questions · sources */
+:root {
+  --bg: #f2f3f6; --surface: #ffffff; --ink: #161a22; --muted: #5a6373; --line: #d3d8e1;
+  --redis: #c8312a; --redis-bg: #fbeceb;
+  --data: #1f63c4; --data-bg: #e7effb;
+  --good: #0d7a50; --good-bg: #e1f4eb;
+  --bad: #b42318; --bad-bg: #fdeceb;
+  --warn: #a15c00; --warn-bg: #fdf1dc;
+  --s0: #1f63c4; --s1: #0d7a50; --s2: #8a4fd0; --s3: #c86a12; --s4: #0e7f8c; --s5: #b0306a;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+    --redis: #f0605a; --redis-bg: #2c1716; --data: #74a9ff; --data-bg: #17253b;
+    --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+    --warn: #f0b04a; --warn-bg: #2e2412; color-scheme: dark;
+    --s0: #74a9ff; --s1: #43d199; --s2: #b892ff; --s3: #f0a050; --s4: #4cc8d6; --s5: #f07aaa;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+  --redis: #f0605a; --redis-bg: #2c1716; --data: #74a9ff; --data-bg: #17253b;
+  --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+  --warn: #f0b04a; --warn-bg: #2e2412; color-scheme: dark;
+  --s0: #74a9ff; --s1: #43d199; --s2: #b892ff; --s3: #f0a050; --s4: #4cc8d6; --s5: #f07aaa;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 17px; line-height: 1.5; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 28px 16px 64px; }
+h1, h2, h3 { font-family: var(--f-display); letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(30px, 4.4vw, 48px); font-weight: 800; line-height: 1.05; }
+h1 .r { color: var(--redis); }
+h2 { font-size: clamp(22px, 2.6vw, 30px); font-weight: 800; }
+h3 { font-size: 19px; font-weight: 600; }
+p { margin: 0; max-width: 74ch; }
+a { color: var(--data); }
+code, pre { font-family: var(--f-mono); font-size: 0.86em; }
+pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.credit { color: var(--muted); font-size: 13px; font-style: italic; }
+header.top { display: grid; gap: 12px; }
+nav.jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+nav.jump a { font-size: 14px; text-decoration: none; color: var(--ink); border: 1px solid var(--line); background: var(--surface); padding: 5px 12px; border-radius: 999px; }
+nav.jump a:hover, nav.jump a:focus-visible { border-color: var(--redis); outline: none; }
+section.stage { margin-top: 48px; display: grid; gap: 14px; scroll-margin-top: 12px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--redis); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.pad { padding: 14px 16px; display: grid; gap: 10px; min-width: 0; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+@media (max-width: 860px) { .two, .three { grid-template-columns: minmax(0, 1fr); } }
+.callout { border-left: 4px solid var(--warn); background: var(--warn-bg); }
+.callout h3 { color: var(--warn); }
+ul.tight { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+button { font: inherit; font-size: 15px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 700; }
+button[aria-pressed="true"] { background: var(--redis); border-color: var(--redis); color: #fff; font-weight: 700; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--redis); outline-offset: 2px; }
+button.small { font-size: 12.5px; padding: 2px 8px; }
+
+/* slot calculator */
+.keyin { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.keyin input { font: 600 18px var(--f-mono); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); width: min(420px, 100%); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips button { font-family: var(--f-mono); font-size: 13px; padding: 3px 10px; border-radius: 999px; }
+.calc { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 820px) { .calc { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.step { padding: 12px 14px; display: grid; gap: 4px; min-width: 0; }
+.step .t { font-size: 13px; color: var(--muted); }
+.step .n { font: 600 20px var(--f-mono); overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.keyshow { font: 600 20px var(--f-mono); overflow-wrap: anywhere; }
+.keyshow .dim { opacity: .35; }
+.keyshow .tag { background: var(--data-bg); color: var(--data); border-radius: 4px; padding: 0 2px; }
+.slotbar { position: relative; height: 28px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); display: flex; }
+.slotbar .seg { height: 100%; display: flex; align-items: center; justify-content: center; font: 600 12px var(--f-mono); color: #fff; white-space: nowrap; overflow: hidden; transition: flex-grow .6s ease; }
+.slotbar .pin { position: absolute; top: -2px; bottom: -2px; width: 3px; background: var(--ink); transition: left .3s ease; }
+.axis { display: flex; justify-content: space-between; font: 12px var(--f-mono); color: var(--muted); }
+.compare { font-size: 15px; }
+
+/* cluster sim */
+.simwrap { display: grid; gap: 12px; }
+#sim { position: relative; min-height: 330px; }
+.cards { display: grid; gap: 10px; }
+.card { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 10px 8px; display: grid; gap: 6px; min-width: 0; transition: border-color .3s, background .3s, opacity .3s; }
+.card .hd { display: flex; align-items: center; gap: 6px; justify-content: space-between; flex-wrap: wrap; }
+.card .nm { font: 800 16px var(--f-display); }
+.card .sl { font: 12px var(--f-mono); color: var(--muted); overflow-wrap: anywhere; }
+.card .role { display: flex; gap: 4px; flex-wrap: wrap; font: 11.5px var(--f-mono); }
+.pill { padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); }
+.pill.up { background: var(--good-bg); color: var(--good); border-color: transparent; }
+.pill.down { background: var(--bad-bg); color: var(--bad); border-color: transparent; }
+.pill.warn { background: var(--warn-bg); color: var(--warn); border-color: transparent; }
+.card .dots { height: 150px; position: relative; }
+.card .load { height: 8px; border-radius: 4px; background: var(--bg); overflow: hidden; }
+.card .load i { display: block; height: 100%; width: 0; background: var(--ink); transition: width .6s ease, background .3s; }
+.card .lt { font: 12px var(--f-mono); color: var(--muted); }
+.card.dead { border-color: var(--bad); background: var(--bad-bg); }
+.card.sus { border-color: var(--warn); background: var(--warn-bg); }
+.dot { position: absolute; width: 12px; height: 12px; border-radius: 50%; transition: left .7s cubic-bezier(.4,.1,.2,1), top .7s cubic-bezier(.4,.1,.2,1), transform .3s, box-shadow .4s; transform: translate(-50%, -50%); }
+.dot.moved { box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--ink); }
+.dot.hot { width: 18px; height: 18px; box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--redis); }
+.banner { padding: 10px 14px; border-radius: 8px; font-weight: 700; display: none; }
+.banner.show { display: block; }
+.banner.bad { background: var(--bad-bg); color: var(--bad); border: 1px solid var(--bad); }
+.banner.good { background: var(--good-bg); color: var(--good); border: 1px solid var(--good); }
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 820px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stat { padding: 10px 14px; display: grid; gap: 2px; min-width: 0; }
+.stat .n { font: 800 24px var(--f-display); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat .t { font-size: 13px; color: var(--muted); }
+.log { list-style: none; margin: 0; padding: 12px 14px; display: grid; gap: 6px; font-size: 14.5px; max-height: 280px; overflow: auto; }
+.log li { display: grid; gap: 2px; animation: fadein .35s ease; }
+.log code { color: var(--redis); }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .dot, .slotbar .seg, .card .load i { transition: none; } .log li { animation: none; } }
+
+/* transcripts and tables */
+.term { background: #11141a; color: #e6e9ef; border-radius: 8px; padding: 12px 14px; font: 13.5px/1.6 var(--f-mono); }
+.term .c { color: #7fb4ff; } .term .s { color: #ff8a80; } .term .k { color: #8a93a3; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 15px; }
+.tbl th, .tbl td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl th { font-size: 13px; color: var(--muted); font-weight: 700; }
+.tblwrap { overflow-x: auto; }
+.tag2 { font-family: var(--f-mono); font-size: 12px; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+.tag2.ok { background: var(--good-bg); color: var(--good); }
+.tag2.no { background: var(--bad-bg); color: var(--bad); }
+.tag2.meh { background: var(--warn-bg); color: var(--warn); }
+ol.plain li + li { margin-top: 8px; }
+.sources { font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">CS 452 · Redis · scaling</div>
+  <h1>How Redis <span class="r">Scales</span></h1>
+  <p>Redis keeps everything in RAM on one machine, and that one machine gets you surprisingly far. When it stops being enough, <b>Redis Cluster</b> splits the keys across several machines using <b>16,384 hash slots</b>. This page shows where a key lives, what happens when servers are added, removed or die, and what Redis does (and doesn't do) about balancing load.</p>
+  <p class="credit">[Page created using Claude by Professor Reynolds]</p>
+  <nav class="jump" aria-label="Sections">
+    <a href="#up">1 · Scale up first</a>
+    <a href="#slots">2 · Where a key lives</a>
+    <a href="#cluster">3 · Servers coming and going</a>
+    <a href="#redirects">4 · MOVED and ASK</a>
+    <a href="#balance">5 · Load balancing</a>
+    <a href="#ring">6 · Slots vs. a hash ring</a>
+    <a href="#questions">Questions</a>
+  </nav>
+</header>
+
+<!-- ======================= 1 ======================= -->
+<section class="stage" id="up">
+  <div class="eyebrow">1 · Scale up first</div>
+  <h2>Most Redis setups are one primary, plus a copy</h2>
+  <p>Before anyone shards Redis, they usually make the one machine bigger and add a backup. Scaling up is boring, and boring is good: no slot maps, no redirects and no rules about which keys can be used together.</p>
+  <div class="three">
+    <div class="panel pad"><h3>More memory</h3><p>Buy a bigger machine. Cloud providers sell Redis nodes with hundreds of GB of RAM, and most caches are far smaller than that.</p></div>
+    <div class="panel pad"><h3>More reads</h3><p>Add <b>replicas</b>: copies that follow the primary and answer reads. Writes still go to the one primary.</p></div>
+    <div class="panel pad"><h3>Survive a crash</h3><p><b>Redis Sentinel</b> (or your cloud provider) watches the primary and promotes a replica if it dies. That gives you availability, not more capacity: every node holds all the data.</p></div>
+  </div>
+  <div class="two">
+    <div class="panel pad">
+      <h3>When one machine stops being enough</h3>
+      <ul class="tight">
+        <li><b>The data won't fit</b> in the RAM of the biggest node you are willing to pay for.</li>
+        <li><b>Writes max out one CPU core.</b> Redis runs commands one at a time on a single main thread. Since Redis 6, extra threads can handle network I/O, but commands still run one at a time. A 64-core box doesn't give you 64× the writes; several primaries do.</li>
+        <li><b>You want to grow in small steps</b> instead of jumping to the next machine size.</li>
+      </ul>
+    </div>
+    <div class="panel pad callout">
+      <h3>So how many people actually cluster?</h3>
+      <p>We looked for a percentage and couldn't find a trustworthy one. Redis, AWS, Azure and Google don't publish the split between clustered and single-primary deployments, and the numbers floating around blogs have no sources.</p>
+      <p>What we can say: <b>Azure Managed Redis</b> now creates every new cache in clustered mode, but with <b>one shard</b>, so it is "clustered" on paper while still living on one primary until it grows. Redis's own write-up still recommends standalone mode for its simplicity, compatibility and lower cost.</p>
+      <p><b>Our best guess, not a statistic:</b> most deployments are one primary with replicas, and clusters show up when data or write volume outgrows one machine.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 2 ======================= -->
+<section class="stage" id="slots">
+  <div class="eyebrow">2 · Where a key lives</div>
+  <h2>Every key belongs to one of 16,384 slots</h2>
+  <p>Redis Cluster never hashes a key straight to a server. It hashes the key to a <b>slot</b> with <code>CRC16(key) mod 16384</code>, and a table says which server owns each slot. Moving data means moving slots, not rehashing keys. If the key contains <code>{…}</code>, only the part inside the braces is hashed. That's a <b>hash tag</b>, and it's how you keep related keys together.</p>
+  <div class="panel pad">
+    <div class="keyin">
+      <label for="key" style="font-weight:700">Key</label>
+      <input id="key" value="{user42}:cart" spellcheck="false" autocomplete="off" aria-describedby="keyhelp">
+    </div>
+    <div class="chips" id="chips" aria-label="Example keys"></div>
+    <div id="keyhelp" class="keyshow" aria-live="polite"></div>
+    <div class="calc">
+      <div class="panel step"><span class="t">1 · Text that gets hashed</span><span class="n" id="cHashed"></span></div>
+      <div class="panel step"><span class="t">2 · CRC16 of that text</span><span class="n" id="cCrc"></span></div>
+      <div class="panel step"><span class="t">3 · mod 16384 = slot</span><span class="n" id="cSlot"></span></div>
+      <div class="panel step"><span class="t">4 · Owner (3-node cluster)</span><span class="n" id="cNode"></span></div>
+    </div>
+    <div class="slotbar" id="calcBar"></div>
+    <div class="axis"><span>slot 0</span><span>8,191</span><span>16,383</span></div>
+    <p class="compare" id="cCompare"></p>
+  </div>
+  <div class="two">
+    <div class="panel pad">
+      <h3>Why hash tags matter</h3>
+      <p>A command that touches several keys (<code>MGET</code>, <code>MULTI</code>/<code>EXEC</code>, a Lua script) only works in a cluster if <b>every key is in the same slot</b>. Otherwise you get <code>CROSSSLOT Keys in request don't hash to the same slot</code>. Give the keys a shared tag (<code>{user42}:cart</code>, <code>{user42}:profile</code>) and they always land together.</p>
+    </div>
+    <div class="panel pad">
+      <h3>The fine print</h3>
+      <ul class="tight">
+        <li>Only the <b>first</b> <code>{</code> and the next <code>}</code> count.</li>
+        <li>Empty braces don't count: <code>foo{}{bar}</code> hashes the whole key.</li>
+        <li>The flip side: everything with one tag lives on <b>one</b> node. Tag a million keys <code>{everything}</code> and you've rebuilt a single server.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 3 ======================= -->
+<section class="stage" id="cluster">
+  <div class="eyebrow">3 · Servers coming and going</div>
+  <h2>Add, remove and crash nodes in a live cluster</h2>
+  <p>Each column is a <b>primary</b> with one <b>replica</b>. Each dot is a key, colored by the node that owns its slot. Add a node and watch only some keys move. Crash a primary and watch <i>no</i> keys move: its replica just takes over the same slots. Turn on the hot key and watch one node do most of the work.</p>
+  <div class="simwrap">
+    <div class="controls">
+      <button class="primary" id="bAdd">Add a node</button>
+      <button id="bRemove">Remove a node</button>
+      <button id="bHot" aria-pressed="false">Hot key: off</button>
+      <button id="bRebalance">Rebalance slots</button>
+      <button id="bReset">Reset</button>
+      <span style="font-size:14px;color:var(--muted)">Each node also has <b>Crash</b> and <b>Recover</b> buttons.</span>
+    </div>
+    <div class="banner" id="banner" role="status"></div>
+    <div class="slotbar" id="simBar" aria-label="Slot ownership"></div>
+    <div class="axis"><span>slot 0</span><span>8,191</span><span>16,383</span></div>
+    <div id="sim"><div class="cards" id="cards"></div></div>
+    <div class="stats">
+      <div class="panel stat"><span class="n" id="sNodes">3</span><span class="t">primaries</span></div>
+      <div class="panel stat"><span class="n" id="sMoved">–</span><span class="t">keys moved by the last change</span></div>
+      <div class="panel stat"><span class="n" id="sMod">–</span><span class="t">would move with <code>hash % nodes</code></span></div>
+      <div class="panel stat"><span class="n" id="sHot">–</span><span class="t">busiest node's share of traffic</span></div>
+    </div>
+    <div class="panel"><ol class="log" id="log" aria-live="polite"></ol></div>
+  </div>
+</section>
+
+<!-- ======================= 4 ======================= -->
+<section class="stage" id="redirects">
+  <div class="eyebrow">4 · MOVED and ASK</div>
+  <h2>How clients find the right node, even mid-move</h2>
+  <p>There is no proxy in front of a Redis Cluster. Clients keep their own copy of the slot table and talk straight to the right node. When their copy is out of date, the node tells them where to go.</p>
+  <div class="two">
+    <div class="panel pad">
+      <h3><code>MOVED</code>: "that slot lives somewhere else now"</h3>
+<pre class="term"><span class="k"># client's map still says slot 4321 is on A</span>
+<span class="c">client → A:</span> GET user:7
+<span class="s">A → client:</span> -MOVED 4321 10.0.0.12:6379
+<span class="k"># client updates its map: 4321 → B, retries</span>
+<span class="c">client → B:</span> GET user:7
+<span class="s">B → client:</span> "Ada"</pre>
+      <p>Permanent. The client fixes its slot table, and every later request for slot 4321 goes straight to B.</p>
+    </div>
+    <div class="panel pad">
+      <h3><code>ASK</code>: "this one key already moved, ask B just this once"</h3>
+<pre class="term"><span class="k"># slot 4321 is half-moved: A MIGRATING → B IMPORTING</span>
+<span class="c">client → A:</span> GET user:7
+<span class="s">A → client:</span> -ASK 4321 10.0.0.12:6379
+<span class="c">client → B:</span> ASKING
+<span class="c">client → B:</span> GET user:7
+<span class="s">B → client:</span> "Ada"
+<span class="k"># next request for slot 4321 still goes to A first</span></pre>
+      <p>One-time. During a move, A still answers for keys it has. For keys already sent to B, it says ASK. Once the whole slot is moved, A starts answering MOVED.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= 5 ======================= -->
+<section class="stage" id="balance">
+  <div class="eyebrow">5 · Load balancing</div>
+  <h2>Redis balances <em>slots</em>, not traffic</h2>
+  <p>CRC16 scatters keys evenly across slots, so if slots are evenly spread, <b>data</b> is roughly even. But Redis Cluster has no idea which keys are busy. Balancing <b>work</b> is mostly your job.</p>
+  <div class="panel tblwrap">
+    <table class="tbl">
+      <thead><tr><th>Job</th><th>Does Redis Cluster do it?</th><th>How</th></tr></thead>
+      <tbody>
+        <tr><td>Spread keys over slots</td><td><span class="tag2 ok">automatic</span></td><td>CRC16 mod 16384 scatters keys evenly, unless you over-use one hash tag.</td></tr>
+        <tr><td>Spread slots over nodes</td><td><span class="tag2 meh">when you run it</span></td><td><code>redis-cli --cluster rebalance</code> evens out slot counts (optionally weighted). Redis's docs say it can't yet rebalance by looking at where the keys actually are.</td></tr>
+        <tr><td>Give a new node some data</td><td><span class="tag2 meh">when you run it</span></td><td><code>--cluster add-node</code> joins with 0 slots. Then <code>--cluster reshard</code> or <code>rebalance</code> moves slots to it, live.</td></tr>
+        <tr><td>Take a node away</td><td><span class="tag2 meh">when you run it</span></td><td>A primary must be emptied first (reshard its slots away). Then <code>--cluster del-node</code>.</td></tr>
+        <tr><td>Replace a dead primary</td><td><span class="tag2 ok">automatic</span></td><td>Its replica is promoted once a majority of primaries agree it's down: <code>cluster-node-timeout</code>, then usually 1–2 s.</td></tr>
+        <tr><td>Spread reads to replicas</td><td><span class="tag2 meh">if the client asks</span></td><td>A client that sends <code>READONLY</code> can read from replicas, accepting slightly stale data.</td></tr>
+        <tr><td>Split one hot key</td><td><span class="tag2 no">no</span></td><td>A key lives in one slot on one node. Spread reads to replicas, cache it in the app, or keep several copies under <i>different</i> keys (not one shared tag).</td></tr>
+        <tr><td>Add nodes when busy</td><td><span class="tag2 no">not in Redis itself</span></td><td>Managed services can add shards for you based on CPU or memory. Open-source Redis waits for an operator.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ======================= 6 ======================= -->
+<section class="stage" id="ring">
+  <div class="eyebrow">6 · Slots vs. a hash ring</div>
+  <h2>Same goal as consistent hashing, different machinery</h2>
+  <p>Both avoid the disaster of <code>hash(key) % nodes</code>, where adding one server moves almost every key. A consistent-hashing ring and Redis's slot table both move only about <b>1/n</b> of the keys.</p>
+  <div class="panel tblwrap">
+    <table class="tbl">
+      <thead><tr><th></th><th>Consistent-hashing ring</th><th>Redis hash slots</th></tr></thead>
+      <tbody>
+        <tr><td>Where a key goes</td><td>Hash onto a ring; the next node clockwise owns it</td><td>CRC16 mod 16384 picks a slot; a table says which node owns that slot</td></tr>
+        <tr><td>Who keeps the map</td><td>Each client computes the ring from the node list</td><td>The cluster owns the table; nodes gossip it; clients cache it and fix it on MOVED</td></tr>
+        <tr><td>Adding a node</td><td>It takes arcs from its neighbors (virtual nodes even this out)</td><td>You choose exactly which slots move to it</td></tr>
+        <tr><td>Keys that move</td><td>About 1/n</td><td>About 1/n, if you reshard evenly</td></tr>
+        <tr><td>Keeping related keys together</td><td>No built-in way</td><td>Hash tags: <code>{user42}:cart</code></td></tr>
+        <tr><td>Where you'll see it</td><td>Memcached clients, Cassandra and Dynamo-style stores, older Redis proxies like twemproxy</td><td>Redis Cluster, Valkey, and the managed Redis services built on them</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="stage" id="questions">
+  <div class="eyebrow">Think about it</div>
+  <h2>Questions to discuss with a neighbor</h2>
+  <ol class="panel plain" style="padding:16px 16px 16px 40px">
+    <li><code>{user42}:cart</code> and <code>{user42}:profile</code> always share a slot. Why is that great for a transaction, and when could it hurt?</li>
+    <li>In the simulator, add a fourth node to a 3-node cluster. What fraction of keys moved? What would have moved with <code>hash % nodes</code>, and why is that so much worse for a cache?</li>
+    <li>Why does a crash move <b>zero</b> keys, while adding a node moves many?</li>
+    <li>Crash a primary, then crash the replica that took over. Why does the whole cluster stop answering, even for keys on healthy nodes? (Look up <code>cluster-require-full-coverage</code>.) When might you turn that off?</li>
+    <li>One product key gets 40% of all reads. Why won't adding nodes help? What will?</li>
+    <li>Your cache is 20 GB and does 30,000 operations a second. One big node or a cluster? What number would change your mind?</li>
+  </ol>
+</section>
+
+<p class="sources" style="margin-top:32px">Sources: <a href="https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/" target="_blank">Redis Cluster specification</a> (hash slots, hash tags, MOVED/ASK, failure detection, the ~1,000-node design goal) · <a href="https://redis.io/docs/latest/operate/oss_and_stack/management/scaling/" target="_blank">Scale with Redis Cluster</a> (reshard, add-node, del-node, READONLY, cluster-node-timeout) · <a href="https://redis.io/blog/inside-azure-managed-redis-why-choose-standalone-mode/" target="_blank">Inside Azure Managed Redis: why choose standalone mode?</a> (Dec 2025). The simulator uses the real CRC16 slot function; its sizes and timings are simplified.</p>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const N_SLOTS = 16384;
+const crc16 = s => {
+  let crc = 0;
+  for (const b of new TextEncoder().encode(s)) {
+    crc ^= b << 8;
+    for (let i = 0; i < 8; i++) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+  }
+  return crc;
+};
+const tagOf = key => {
+  const s = key.indexOf("{");
+  if (s < 0) return null;
+  const e = key.indexOf("}", s + 1);
+  if (e < 0 || e === s + 1) return null;
+  return { s, e, text: key.slice(s + 1, e) };
+};
+const slotOf = key => { const t = tagOf(key); return crc16(t ? t.text : key) % N_SLOTS; };
+const fmt = n => n.toLocaleString("en-US");
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const color = i => `var(--s${i % 6})`;
+const NAMES = ["A", "B", "C", "D", "E", "F"];
+
+/* ======================= 2 · slot calculator ======================= */
+const examples = ["{user42}:cart", "{user42}:profile", "user42:cart", "foo", "foo{}{bar}", "foo{{bar}}zap", "session:9f3a"];
+examples.forEach(k => { const b = document.createElement("button"); b.textContent = k; b.onclick = () => { $("key").value = k; calc(); }; $("chips").appendChild(b); });
+const ranges3 = [[0, 5460], [5461, 10922], [10923, 16383]];
+$("calcBar").innerHTML = ranges3.map((r, i) => `<div class="seg" style="flex-grow:${r[1] - r[0] + 1};background:${color(i)}">${NAMES[i]} · ${fmt(r[0])}–${fmt(r[1])}</div>`).join("") + `<div class="pin" id="calcPin"></div>`;
+function calc() {
+  const key = $("key").value;
+  const t = tagOf(key);
+  const hashed = t ? t.text : key;
+  const crc = crc16(hashed), slot = crc % N_SLOTS;
+  const node = ranges3.findIndex(r => slot >= r[0] && slot <= r[1]);
+  $("keyhelp").innerHTML = key === "" ? "&nbsp;" : t
+    ? `<span class="dim">${esc(key.slice(0, t.s + 1))}</span><span class="tag">${esc(t.text)}</span><span class="dim">${esc(key.slice(t.e))}</span>`
+    : `<span class="tag">${esc(key)}</span>`;
+  $("cHashed").textContent = hashed === "" ? "(empty)" : `"${hashed}"`;
+  $("cCrc").textContent = fmt(crc);
+  $("cSlot").textContent = fmt(slot);
+  $("cNode").innerHTML = `<span style="color:${color(node)}">Node ${NAMES[node]}</span>`;
+  $("calcPin").style.left = `calc(${(slot / N_SLOTS) * 100}% - 1px)`;
+  let msg = t ? `Only <code>${esc(t.text)}</code> is hashed, so every key tagged <code>{${esc(t.text)}}</code> lands in slot ${fmt(slot)} on node ${NAMES[node]}.`
+              : `No usable hash tag, so the whole key is hashed.`;
+  if (t && key.startsWith("{user42}")) {
+    const other = slotOf("user42:cart");
+    msg += ` Without the braces, <code>user42:cart</code> would land in slot ${fmt(other)} instead.`;
+  }
+  $("cCompare").innerHTML = msg;
+}
+$("key").addEventListener("input", calc);
+calc();
+
+/* ======================= 3 · cluster simulator ======================= */
+const KEYS = [];
+for (let i = 1; i <= 34; i++) KEYS.push(`user:${i}`);
+for (let i = 1; i <= 14; i++) KEYS.push(`session:${(i * 2654435761 >>> 0).toString(16).slice(0, 5)}`);
+["cart", "profile", "prefs"].forEach(s => KEYS.push(`{user42}:${s}`));
+["views", "likes"].forEach(s => KEYS.push(`{post9}:${s}`));
+for (let i = 1; i <= 10; i++) KEYS.push(`product:${i * 37}`);
+const HOT = "product:popular";
+KEYS.push(HOT);
+const keySlot = new Map(KEYS.map(k => [k, slotOf(k)]));
+
+let S; // state
+function fresh() {
+  const owner = new Uint8Array(N_SLOTS);
+  for (let s = 0; s < N_SLOTS; s++) owner[s] = Math.min(2, Math.floor(s * 3 / N_SLOTS));
+  return {
+    owner,
+    shards: [0, 1, 2].map(i => ({ id: i, name: NAMES[i], primaryUp: true, replicaUp: true, phase: "ok", failovers: 0 })),
+    hot: false, moved: new Set(), lastMoved: null, lastMod: null, busy: false,
+  };
+}
+const ownerOf = k => S.owner[keySlot.get(k)];
+const counts = () => { const c = S.shards.map(() => 0); for (let s = 0; s < N_SLOTS; s++) c[S.owner[s]]++; return c; };
+const rangesOf = i => { const out = []; let start = -1; for (let s = 0; s <= N_SLOTS; s++) { const own = s < N_SLOTS && S.owner[s] === i; if (own && start < 0) start = s; if (!own && start >= 0) { out.push([start, s - 1]); start = -1; } } return out; };
+const rangeText = i => { const r = rangesOf(i); if (!r.length) return "no slots"; const t = r.slice(0, 2).map(([a, b]) => a === b ? fmt(a) : `${fmt(a)}–${fmt(b)}`).join(", "); return r.length > 2 ? `${t} +${r.length - 2} more` : t; };
+const downShards = () => S.shards.filter(s => !s.primaryUp && !s.replicaUp && counts()[s.id] > 0);
+
+function log(html, cmd) {
+  const li = document.createElement("li");
+  li.innerHTML = (cmd ? `<code>${esc(cmd)}</code>` : "") + `<span>${html}</span>`;
+  $("log").appendChild(li);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+function banner() {
+  const b = $("banner"), dead = downShards();
+  b.className = "banner";
+  if (dead.length) { b.classList.add("show", "bad"); b.textContent = `Cluster is DOWN: node ${dead.map(d => d.name).join(", ")} has no primary or replica left for its slots, so every node refuses queries (cluster-require-full-coverage is on by default).`; }
+  else if (S.shards.some(s => s.phase === "pfail")) { b.classList.add("show", "bad"); b.textContent = "A primary stopped answering. Its slots are unavailable until a replica is promoted."; }
+}
+function traffic() {
+  const n = S.shards.length, share = S.shards.map(() => 0);
+  const cold = S.hot ? 0.6 : 1;
+  const normal = KEYS.filter(k => !(S.hot && k === HOT));
+  normal.forEach(k => share[ownerOf(k)] += cold / normal.length);
+  if (S.hot) share[ownerOf(HOT)] += 0.4;
+  return share;
+}
+
+function render() {
+  const n = S.shards.length, cnt = counts(), share = traffic();
+  // slot bar
+  const segs = []; let start = 0;
+  for (let s = 1; s <= N_SLOTS; s++) if (s === N_SLOTS || S.owner[s] !== S.owner[start]) { segs.push([start, s - 1, S.owner[start]]); start = s; }
+  $("simBar").innerHTML = segs.map(([a, b, o]) => `<div class="seg" title="slots ${fmt(a)}–${fmt(b)} → ${NAMES[o]}" style="flex-grow:${b - a + 1};background:${color(o)}">${b - a > 1400 ? NAMES[o] : ""}</div>`).join("");
+  // cards
+  const cards = $("cards");
+  cards.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+  cards.innerHTML = S.shards.map(sh => {
+    const dead = !sh.primaryUp && !sh.replicaUp, sus = sh.phase === "pfail";
+    const roleP = sh.primaryUp ? `<span class="pill up">primary ✓</span>` : `<span class="pill down">primary ✗</span>`;
+    const roleR = sh.replicaUp ? `<span class="pill up">replica ✓</span>` : `<span class="pill ${sh.primaryUp ? "warn" : "down"}">${sh.primaryUp ? "no replica" : "replica ✗"}</span>`;
+    const canCrash = !S.busy && (sh.primaryUp || sh.replicaUp);
+    const canRecover = !S.busy && (!sh.primaryUp || !sh.replicaUp) && sh.phase !== "pfail";
+    const pct = Math.round(share[sh.id] * 100);
+    return `<div class="card ${dead ? "dead" : sus ? "sus" : ""}" style="border-top:4px solid ${color(sh.id)}">
+      <div class="hd"><span class="nm" style="color:${color(sh.id)}">Node ${sh.name}</span>
+        <span><button class="small" data-crash="${sh.id}" ${canCrash ? "" : "disabled"}>Crash</button> <button class="small" data-recover="${sh.id}" ${canRecover ? "" : "disabled"}>Recover</button></span></div>
+      <div class="role">${roleP}${roleR}</div>
+      <div class="sl">${fmt(cnt[sh.id])} slots · ${rangeText(sh.id)}</div>
+      <div class="dots" data-dots="${sh.id}"></div>
+      <div class="load"><i style="width:${Math.min(100, pct * 1.6)}%;background:${pct > 45 ? "var(--bad)" : color(sh.id)}"></i></div>
+      <div class="lt">${pct}% of traffic</div>
+    </div>`;
+  }).join("");
+  cards.querySelectorAll("[data-crash]").forEach(b => b.onclick = () => crash(+b.dataset.crash));
+  cards.querySelectorAll("[data-recover]").forEach(b => b.onclick = () => recover(+b.dataset.recover));
+  placeDots();
+  // stats
+  $("sNodes").textContent = n;
+  $("sMoved").textContent = S.lastMoved == null ? "–" : `${S.lastMoved.moved} of ${KEYS.length}`;
+  $("sMod").textContent = S.lastMod == null ? "–" : `${S.lastMod} of ${KEYS.length}`;
+  $("sHot").textContent = `${Math.round(Math.max(...share) * 100)}%`;
+  $("bAdd").disabled = S.busy || n >= 6 || downShards().length > 0;
+  $("bRemove").disabled = S.busy || n <= 2 || downShards().length > 0;
+  $("bRebalance").disabled = S.busy || downShards().length > 0;
+  $("bHot").setAttribute("aria-pressed", S.hot); $("bHot").textContent = `Hot key: ${S.hot ? "on" : "off"}`;
+  banner();
+}
+
+const dotEls = new Map();
+function placeDots() {
+  const sim = $("sim"), base = sim.getBoundingClientRect();
+  KEYS.forEach(k => {
+    let d = dotEls.get(k);
+    if (!d) { d = document.createElement("div"); d.className = "dot"; sim.appendChild(d); dotEls.set(k, d); }
+    d.title = `${k} → slot ${fmt(keySlot.get(k))}`;
+  });
+  S.shards.forEach(sh => {
+    const area = document.querySelector(`[data-dots="${sh.id}"]`);
+    if (!area) return;
+    const r = area.getBoundingClientRect();
+    const mine = KEYS.filter(k => ownerOf(k) === sh.id).sort((a, b) => keySlot.get(a) - keySlot.get(b));
+    const cols = Math.max(3, Math.floor((r.width - 8) / 18));
+    mine.forEach((k, i) => {
+      const d = dotEls.get(k);
+      d.style.left = `${r.left - base.left + 12 + (i % cols) * 18}px`;
+      d.style.top = `${r.top - base.top + 10 + Math.floor(i / cols) * 18}px`;
+      d.style.background = color(sh.id);
+      d.style.opacity = (!sh.primaryUp && (sh.phase === "pfail" || !sh.replicaUp)) ? 0.3 : 1;
+      d.classList.toggle("moved", S.moved.has(k));
+      d.classList.toggle("hot", S.hot && k === HOT);
+    });
+  });
+}
+
+const wait = ms => new Promise(r => setTimeout(r, ms));
+function snapshot() { return new Map(KEYS.map(k => [k, ownerOf(k)])); }
+function finishMove(before, nBefore, nAfter) {
+  S.moved = new Set(KEYS.filter(k => before.get(k) !== ownerOf(k)));
+  const mod = KEYS.filter(k => crc16(k) % nBefore !== crc16(k) % nAfter).length;
+  S.lastMoved = { moved: S.moved.size }; S.lastMod = mod;
+  render();
+  setTimeout(() => { S.moved.clear(); placeDots(); }, 2600);
+}
+
+async function addNode() {
+  if (S.busy) return;
+  S.busy = true;
+  const id = S.shards.length, nm = NAMES[id];
+  S.shards.push({ id, name: nm, primaryUp: true, replicaUp: true, phase: "ok", failovers: 0 });
+  log(`Node ${nm} joins with <b>0 slots</b>. Adding a node never moves data by itself.`, `redis-cli --cluster add-node <${nm}> <A>`);
+  render();
+  await wait(900);
+  const before = snapshot(), cnt = counts(), target = Math.floor(N_SLOTS / (id + 1));
+  const plan = [];
+  for (let i = 0; i < id; i++) {
+    const give = cnt[i] - target; if (give <= 0) continue;
+    let left = give;
+    for (let s = N_SLOTS - 1; s >= 0 && left > 0; s--) if (S.owner[s] === i) { S.owner[s] = id; left--; }
+    plan.push(`${fmt(give)} from ${NAMES[i]}`);
+  }
+  log(`Move ${plan.join(", ")} to ${nm}. For each slot: ${nm} is marked IMPORTING, the old owner MIGRATING, keys are copied in batches with MIGRATE, then the slot is handed over. Clients get ASK during the move and MOVED after it.`, `redis-cli --cluster reshard --cluster-to <${nm}>`);
+  finishMove(before, id, id + 1);
+  log(`<b>${S.moved.size} of ${KEYS.length} keys moved</b> (about 1/${id + 1}). With <code>hash % nodes</code>, ${S.lastMod} would have moved.`);
+  S.busy = false; render();
+}
+
+async function removeNode() {
+  if (S.busy || S.shards.length <= 2) return;
+  S.busy = true;
+  const gone = S.shards[S.shards.length - 1], others = S.shards.slice(0, -1);
+  const before = snapshot();
+  const mine = []; for (let s = 0; s < N_SLOTS; s++) if (S.owner[s] === gone.id) mine.push(s);
+  const per = Math.ceil(mine.length / others.length);
+  mine.forEach((s, i) => S.owner[s] = others[Math.min(others.length - 1, Math.floor(i / per))].id);
+  log(`A primary must be <b>empty</b> before it can leave, so first its ${fmt(mine.length)} slots are resharded to ${others.map(o => o.name).join(", ")}.`, `redis-cli --cluster reshard --cluster-from <${gone.name}>`);
+  render();
+  await wait(1200);
+  S.shards.pop();
+  finishMove(before, others.length + 1, others.length);
+  log(`Node ${gone.name} holds no slots now, so it can be dropped. <b>${S.moved.size} keys moved</b>: only the ones that lived on ${gone.name}.`, `redis-cli --cluster del-node <A> <${gone.name}-id>`);
+  S.busy = false; render();
+}
+
+function rebalance() {
+  if (S.busy) return;
+  const before = snapshot(), n = S.shards.length, cnt = counts();
+  const target = Math.floor(N_SLOTS / n);
+  const extra = []; for (let s = N_SLOTS - 1; s >= 0; s--) { const o = S.owner[s]; if (cnt[o] > target + (o < N_SLOTS % n ? 1 : 0)) { extra.push(s); cnt[o]--; } }
+  S.shards.forEach(sh => { while (cnt[sh.id] < target + (sh.id < N_SLOTS % n ? 1 : 0) && extra.length) { S.owner[extra.pop()] = sh.id; cnt[sh.id]++; } });
+  finishMove(before, n, n);
+  S.lastMod = null;
+  log(S.moved.size ? `Slot counts evened out; ${S.moved.size} keys moved. Note: this balances <b>slots</b>, not traffic.` : `Slots were already even, so nothing moved. Rebalance looks at slot counts, not at which keys are busy.`, `redis-cli --cluster rebalance <A>`);
+  render();
+}
+
+async function crash(i) {
+  const sh = S.shards[i];
+  if (S.busy) return;
+  if (sh.primaryUp) {
+    S.busy = true;
+    sh.primaryUp = false; sh.phase = "pfail";
+    log(`Node ${sh.name}'s primary stops answering. Other nodes mark it <b>PFAIL</b> (possible failure) after <code>cluster-node-timeout</code> (15 s in the default config).`);
+    render();
+    await wait(1400);
+    const n = S.shards.length;
+    const voters = S.shards.filter(s => s.primaryUp && counts()[s.id] > 0).length;
+    if (voters <= n / 2) {
+      sh.phase = "stuck";
+      log(`Only ${voters} of ${n} primaries are reachable, which isn't a majority. Nobody can confirm the failure, so <b>no failover happens</b>.`);
+      S.busy = false; render(); return;
+    }
+    if (!sh.replicaUp) {
+      sh.phase = "ok";
+      log(`A majority agrees: <b>FAIL</b>. But node ${sh.name} has no replica left to promote, so its slots have no owner.`);
+      S.busy = false; render(); return;
+    }
+    log(`${voters} of ${n} primaries agree it's down: <b>FAIL</b>. The replica asks the primaries for votes and wins.`);
+    await wait(1100);
+    sh.primaryUp = true; sh.replicaUp = false; sh.phase = "ok"; sh.failovers++;
+    log(`Replica promoted in about 1–2 s. Node ${sh.name}'s slots stay exactly where they were, so <b>0 keys moved</b>. Writes acknowledged by the old primary but not yet copied to the replica can be lost.`);
+    S.lastMoved = { moved: 0 }; S.lastMod = null;
+    S.busy = false; render();
+  } else if (sh.replicaUp) {
+    sh.replicaUp = false;
+    log(`Node ${sh.name}'s last copy is gone.`);
+    render();
+  }
+}
+function recover(i) {
+  const sh = S.shards[i];
+  if (!sh.primaryUp) { sh.primaryUp = true; sh.phase = "ok"; log(`Node ${sh.name}'s machine comes back as primary and serves its slots again.`); }
+  else if (!sh.replicaUp) { sh.replicaUp = true; log(`The old machine rejoins as a <b>replica</b> of node ${sh.name}'s new primary and copies its data. Recovery never takes slots back by force.`); }
+  render();
+}
+
+$("bAdd").onclick = addNode;
+$("bRemove").onclick = removeNode;
+$("bRebalance").onclick = rebalance;
+$("bHot").onclick = () => {
+  S.hot = !S.hot;
+  if (S.hot) log(`<code>${HOT}</code> now gets 40% of all requests. It lives in slot ${fmt(keySlot.get(HOT))} on node ${S.shards[ownerOf(HOT)].name}, and no reshard can split one key. Try adding nodes and watch the busiest node stay busy.`);
+  else log(`Hot key off: traffic follows the keys again.`);
+  render();
+};
+$("bReset").onclick = () => { S = fresh(); $("log").innerHTML = ""; log(`Three primaries split the 16,384 slots evenly; each has one replica.`); render(); };
+let rt; window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(placeDots, 80); });
+S = fresh();
+log(`Three primaries split the 16,384 slots evenly; each has one replica.`);
+render();
+requestAnimationFrame(placeDots);
+})();
+</script>
+</body>
+</html>
