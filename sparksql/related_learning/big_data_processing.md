@@ -194,4 +194,4 @@ Notice the **same four steps**:
 3. **Shuffle** — `reduceByKey` groups by word (automatic)
 4. **Reduce** — the lambda `a + b` sums the counts
 
-> **Next:** Open `00 - InClassIntro.ipynb` in [Google Colab](https://colab.research.google.com/) and run it to see this in action.
+> **Next:** [Open `00 - InClassIntro.ipynb` in Google Colab](https://colab.research.google.com/github/byu-cs-452/byu-cs-452-class-content/blob/main/sparksql/00%20-%20InClassIntro.ipynb) and run it to see this in action.

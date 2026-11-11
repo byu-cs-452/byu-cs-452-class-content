@@ -111,11 +111,11 @@ These queries use `externaldata` to pull texts directly from the internet — no
 ```kql
 let BookOfMormon =
     externaldata (Line: string)
-    ["https://ia601205.us.archive.org/18/items/thebookofmormon00017gut/mormon13.txt"]
+    ["https://raw.githubusercontent.com/byu-cs-452/byu-cs-452-class-content/main/sparksql/data/bookOfMormon.txt"]
     with (format="txt");
 let Bible =
     externaldata (Line: string)
-    ["https://www.gutenberg.org/cache/epub/10/pg10.txt"]
+    ["https://raw.githubusercontent.com/byu-cs-452/byu-cs-452-class-content/main/sparksql/data/bible.txt"]
     with (format="txt");
 ```
 
@@ -123,7 +123,7 @@ let Bible =
 ```kql
 let BookOfMormon =
     externaldata (Line: string)
-    ["https://ia601205.us.archive.org/18/items/thebookofmormon00017gut/mormon13.txt"]
+    ["https://raw.githubusercontent.com/byu-cs-452/byu-cs-452-class-content/main/sparksql/data/bookOfMormon.txt"]
     with (format="txt");
 BookOfMormon
 | extend Words = extract_all(@"([a-zA-Z]+)", Line)
@@ -139,11 +139,11 @@ BookOfMormon
 ```kql
 let BookOfMormon =
     externaldata (Line: string)
-    ["https://ia601205.us.archive.org/18/items/thebookofmormon00017gut/mormon13.txt"]
+    ["https://raw.githubusercontent.com/byu-cs-452/byu-cs-452-class-content/main/sparksql/data/bookOfMormon.txt"]
     with (format="txt");
 let Bible =
     externaldata (Line: string)
-    ["https://www.gutenberg.org/cache/epub/10/pg10.txt"]
+    ["https://raw.githubusercontent.com/byu-cs-452/byu-cs-452-class-content/main/sparksql/data/bible.txt"]
     with (format="txt");
 let BomWords =
     BookOfMormon
@@ -168,11 +168,11 @@ BomWords
 ```kql
 let BookOfMormon =
     externaldata (Line: string)
-    ["https://ia601205.us.archive.org/18/items/thebookofmormon00017gut/mormon13.txt"]
+    ["https://raw.githubusercontent.com/byu-cs-452/byu-cs-452-class-content/main/sparksql/data/bookOfMormon.txt"]
     with (format="txt");
 let Bible =
     externaldata (Line: string)
-    ["https://www.gutenberg.org/cache/epub/10/pg10.txt"]
+    ["https://raw.githubusercontent.com/byu-cs-452/byu-cs-452-class-content/main/sparksql/data/bible.txt"]
     with (format="txt");
 let BomWords =
     BookOfMormon
@@ -197,11 +197,11 @@ BibleWords
 ```kql
 let BookOfMormon =
     externaldata (Line: string)
-    ["https://ia601205.us.archive.org/18/items/thebookofmormon00017gut/mormon13.txt"]
+    ["https://raw.githubusercontent.com/byu-cs-452/byu-cs-452-class-content/main/sparksql/data/bookOfMormon.txt"]
     with (format="txt");
 let Bible =
     externaldata (Line: string)
-    ["https://www.gutenberg.org/cache/epub/10/pg10.txt"]
+    ["https://raw.githubusercontent.com/byu-cs-452/byu-cs-452-class-content/main/sparksql/data/bible.txt"]
     with (format="txt");
 let BomWords =
     BookOfMormon
