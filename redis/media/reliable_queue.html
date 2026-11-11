@@ -84,8 +84,8 @@ svg text { font-family: var(--f-body); }
 .box.redis { fill: var(--redis-bg); stroke: var(--redis); }
 .box.crashed { fill: var(--bad-bg); stroke: var(--bad); }
 .box.busy { stroke: var(--data); }
-.box.reaper { stroke: var(--warn); }
-.box.reaper.on { fill: var(--warn-bg); }
+.box.restorer { stroke: var(--warn); }
+.box.restorer.on { fill: var(--warn-bg); }
 .t { font-family: var(--f-display); font-weight: 600; font-size: 17px; fill: var(--ink); }
 .t.redis { fill: var(--redis); }
 .s { font-family: var(--f-mono); font-size: 11.5px; fill: var(--muted); }
@@ -117,7 +117,7 @@ g.pkt.warn rect { fill: var(--warn-bg); stroke: var(--warn); } g.pkt.warn text {
 <header class="top">
   <div class="eyebrow">CS 452 · Redis Work Queue Project · Going further</div>
   <h1>Reliable Queues: <span class="r">claim, work, acknowledge</span></h1>
-  <p>With <code>LPOP</code>, a job leaves Redis the moment a worker takes it. If that worker crashes, the job is gone: nobody has it and nobody will ever answer. A reliable queue never lets a job be "in the air." <code>LMOVE</code> moves it from the queue to a <b>processing</b> list in one atomic step. The worker removes it only after the result is saved. A separate <b>reaper</b> process watches the processing list and puts abandoned jobs back in line.</p>
+  <p>With <code>LPOP</code>, a job leaves Redis the moment a worker takes it. If that worker crashes, the job is gone: nobody has it and nobody will ever answer. A reliable queue never lets a job be "in the air." <code>LMOVE</code> moves it from the queue to a <b>processing</b> list in one atomic step. The worker removes it only after the result is saved. A separate <b>restorer</b> process watches the processing list and puts abandoned jobs back in line.</p>
   <p class="credit">[Page created using Claude by Professor Reynolds]</p>
 </header>
 
@@ -131,7 +131,7 @@ g.pkt.warn rect { fill: var(--warn-bg); stroke: var(--warn); } g.pkt.warn text {
     <select id="b-speed" aria-label="Speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
     <span class="clock" id="clock">t = 0 s</span>
   </div>
-  <div class="panel diagram"><svg id="sv" viewBox="0 0 1100 470" role="img" aria-label="Redis queue, processing list and claims hash, with two workers and a reaper process"></svg></div>
+  <div class="panel diagram"><svg id="sv" viewBox="0 0 1100 470" role="img" aria-label="Redis queue, processing list and claims hash, with two workers and a restorer process"></svg></div>
   <div class="two">
     <div class="panel caption" aria-live="polite"><div class="stepno" id="c-no"></div><h3 id="c-title"></h3><pre id="c-cmd"></pre><p id="c-text"></p></div>
     <ol class="panel steps" id="steps"></ol>
@@ -140,8 +140,8 @@ g.pkt.warn rect { fill: var(--warn-bg); stroke: var(--warn); } g.pkt.warn text {
 
 <section class="stage">
   <div class="eyebrow">The code</div>
-  <h2>Three small functions and a reaper</h2>
-  <p>Runnable version with a worker that crashes on purpose: <a href="https://github.com/byu-cs-452/byu-cs-452-class-content/tree/main/redis/reliable_queue_example" target="_blank">redis/reliable_queue_example</a>. Start the reaper, two or three workers and the producer in separate terminals, and watch every job finish even as workers die.</p>
+  <h2>Three small functions and a restorer</h2>
+  <p>Runnable version with a worker that crashes on purpose: <a href="https://github.com/byu-cs-452/byu-cs-452-class-content/tree/main/redis/reliable_queue_example" target="_blank">redis/reliable_queue_example</a>. Start the restorer, two or three workers and the producer in separate terminals, and watch every job finish even as workers die.</p>
   <div class="two even">
     <div class="panel codebox">
 <pre><span class="c"># worker: claim -> work -> save -> acknowledge</span>
@@ -161,7 +161,7 @@ with r.pipeline() as p:                 <span class="c"># then ack</span>
     p.execute()</pre>
     </div>
     <div class="panel codebox">
-<pre><span class="c"># reaper: every few seconds</span>
+<pre><span class="c"># restorer: every few seconds</span>
 for job in r.lrange("jobs:processing", 0, -1):
     claim = r.hget("jobs:claims", id_of(job))
     if claim is None:          <span class="c"># died before HSET:</span>
@@ -194,8 +194,8 @@ end</pre>
         <tr><td><code>RPUSH jobs:queue</code></td><td><code>XADD jobs * image ...</code></td></tr>
         <tr><td><code>BLMOVE</code> to <code>jobs:processing</code> + <code>HSET jobs:claims</code></td><td><code>XREADGROUP GROUP workers w1 BLOCK 5000 STREAMS jobs &gt;</code>. Redis records who has each message in the Pending Entries List.</td></tr>
         <tr><td><code>LREM</code> + <code>HDEL</code> (acknowledge)</td><td><code>XACK jobs workers &lt;id&gt;</code></td></tr>
-        <tr><td>Reaper: <code>LRANGE jobs:processing</code> and check each claim's age</td><td><code>XPENDING jobs workers</code> shows idle time and delivery count</td></tr>
-        <tr><td>Reaper: requeue an abandoned job</td><td><code>XAUTOCLAIM jobs workers w2 10000 0</code> hands jobs idle more than 10 s to another worker</td></tr>
+        <tr><td>Restorer: <code>LRANGE jobs:processing</code> and check each claim's age</td><td><code>XPENDING jobs workers</code> shows idle time and delivery count</td></tr>
+        <tr><td>Restorer: requeue an abandoned job</td><td><code>XAUTOCLAIM jobs workers w2 10000 0</code> hands jobs idle more than 10 s to another worker</td></tr>
         <tr><td><code>jobs:attempts</code> and <code>jobs:dead</code></td><td>Delivery count from <code>XPENDING</code>; past a limit, copy the job to a dead-letter stream and <code>XACK</code> it</td></tr>
       </tbody>
     </table>
@@ -207,8 +207,8 @@ end</pre>
   <div class="eyebrow">Think about it</div>
   <h2>Questions</h2>
   <ol class="panel plain">
-    <li>Why does the reaper put a requeued job at the <em>front</em> of the queue (<code>LPUSH</code>) instead of the back?</li>
-    <li>A worker is slow, not dead, and the reaper requeues its job. What happens when both workers finish? Why is that safe here, and when would it not be (think: charging a credit card)?</li>
+    <li>Why does the restorer put a requeued job at the <em>front</em> of the queue (<code>LPUSH</code>) instead of the back?</li>
+    <li>A worker is slow, not dead, and the restorer requeues its job. What happens when both workers finish? Why is that safe here, and when would it not be (think: charging a credit card)?</li>
     <li>How long should the lease be? What goes wrong if it's 1 second? 1 hour?</li>
     <li>Why is the requeue a Lua script and not three separate commands from Python?</li>
     <li>Why keep a dead-letter list instead of retrying forever?</li>
@@ -251,15 +251,15 @@ const g = { st: el("g", {}, sv), dyn: el("g", {}, sv), pk: el("g", {}, sv) };
   lane(PR, "jobs:processing  (list)  claimed, not yet acknowledged");
   lane(CL, "jobs:claims  (hash)  id → worker, claimed at");
   lane(RS, "result:<id>  (strings)");
-  el("rect", { class: "box reaper", id: "rpbox", x: RP.x, y: RP.y, width: RP.w, height: RP.h, rx: 10 }, g.st);
-  el("text", { class: "t", x: RP.x + 12, y: RP.y + 26, style: "fill:var(--warn)" }, g.st).textContent = "Reaper";
+  el("rect", { class: "box restorer", id: "rpbox", x: RP.x, y: RP.y, width: RP.w, height: RP.h, rx: 10 }, g.st);
+  el("text", { class: "t", x: RP.x + 12, y: RP.y + 26, style: "fill:var(--warn)" }, g.st).textContent = "Restorer";
   el("text", { class: "s", x: RP.x + 12, y: RP.y + 44 }, g.st).textContent = `every few s: any claim older`;
   el("text", { class: "s", x: RP.x + 12, y: RP.y + 60 }, g.st).textContent = `than the ${LEASE} s lease → requeue`;
 })();
 
 let S, gen = 0, fast = false, speed = 1;
 function fresh() {
-  return { T: 0, queue: [], proc: [], claims: {}, tries: {}, results: [], dead: [], hot: null, oldRow: null, reaperOn: false, reaperMsg: "sleeping",
+  return { T: 0, queue: [], proc: [], claims: {}, tries: {}, results: [], dead: [], hot: null, oldRow: null, restorerOn: false, restorerMsg: "sleeping",
            w: { w1: { st: "idle", job: null }, w2: { st: "idle", job: null } }, lostNote: false };
 }
 const chipPos = (lane, i) => ({ x: lane.x + 10 + i * 54, y: lane.y + 8 });
@@ -303,8 +303,8 @@ function render() {
     if (w.job) chip(g.dyn, w.job, wPos(k).x, wPos(k).y, w.st === "crashed" ? "dead" : "");
     if (w.st === "crashed") el("text", { class: "bang", x: b.x + 140, y: b.y + 32 }, g.dyn).textContent = "✗";
   }
-  $("rpbox").setAttribute("class", "box reaper" + (S.reaperOn ? " on" : ""));
-  el("text", { class: "st", x: RP.x + 12, y: RP.y + 92, style: "fill:var(--warn)" }, g.dyn).textContent = S.reaperMsg;
+  $("rpbox").setAttribute("class", "box restorer" + (S.restorerOn ? " on" : ""));
+  el("text", { class: "st", x: RP.x + 12, y: RP.y + 92, style: "fill:var(--warn)" }, g.dyn).textContent = S.restorerMsg;
 }
 
 // ---------- animation helpers ----------
@@ -361,21 +361,21 @@ async function finish(k) {
 async function crash(k) {
   S.w[k].st = "crashed"; render(); await wait(600);
 }
-async function reaperCheck() {
-  S.reaperOn = true; S.reaperMsg = "LRANGE processing 0 -1"; render();
+async function restorerCheck() {
+  S.restorerOn = true; S.restorerMsg = "LRANGE processing 0 -1"; render();
   await send({ x: RP.x, y: RP.y + 60 }, { x: RD.x + RD.w - 8, y: RP.y + 60 }, "LRANGE processing", "warn", 800);
   await wait(300);
 }
-async function reaperRequeue(id) {
-  S.oldRow = id; S.hot = id; S.reaperMsg = `${id}: age ${S.T - S.claims[id].at}s > ${LEASE}s lease`; render(); await wait(900);
+async function restorerRequeue(id) {
+  S.oldRow = id; S.hot = id; S.restorerMsg = `${id}: age ${S.T - S.claims[id].at}s > ${LEASE}s lease`; render(); await wait(900);
   const toDead = (S.tries[id] || 0) >= MAX;
   await send({ x: RP.x, y: RP.y + 60 }, { x: RD.x + RD.w - 8, y: RP.y + 60 }, toDead ? "EVAL requeue → dead" : "EVAL requeue", "warn", 800);
   const from = center(chipPos(PR, S.proc.indexOf(id)));
   S.proc = S.proc.filter(x => x !== id); delete S.claims[id]; S.oldRow = null; render();
-  if (toDead) { await fly(from, { x: RS.x + 32 + S.dead.length * 54, y: RS.y + 113 }, chipFly(id), 900); S.dead.push(id); delete S.tries[id]; S.reaperMsg = `${id} → jobs:dead (${MAX} tries)`; }
-  else { await fly(from, center(chipPos(Q, 0)), chipFly(id), 900); S.queue.unshift(id); S.reaperMsg = `${id} back at the front`; }
+  if (toDead) { await fly(from, { x: RS.x + 32 + S.dead.length * 54, y: RS.y + 113 }, chipFly(id), 900); S.dead.push(id); delete S.tries[id]; S.restorerMsg = `${id} → jobs:dead (${MAX} tries)`; }
+  else { await fly(from, center(chipPos(Q, 0)), chipFly(id), 900); S.queue.unshift(id); S.restorerMsg = `${id} back at the front`; }
   S.hot = null; render(); await wait(400);
-  S.reaperOn = false; render();
+  S.restorerOn = false; render();
 }
 
 const STEPS = [
@@ -400,30 +400,30 @@ const STEPS = [
   { title: "Worker 1 finishes C", cmd: "SET result:C …\nLREM jobs:processing 1 C\nHDEL jobs:claims C",
     text: "Life goes on. Only B is left in the processing list, and its claim gets older every second.",
     run: async () => { S.T = 8; S.lostNote = false; await finish("w1"); } },
-  { title: "The reaper wakes up and checks the processing list", cmd: "LRANGE jobs:processing 0 -1     → [B]\nHGET jobs:claims B               → {\"worker\": \"w2\", \"at\": 2}",
+  { title: "The restorer wakes up and checks the processing list", cmd: "LRANGE jobs:processing 0 -1     → [B]\nHGET jobs:claims B               → {\"worker\": \"w2\", \"at\": 2}",
     text: "A separate process, running on a timer, looks at everything that's been claimed. It's now t=14, so B's claim is 12 seconds old, past the 10-second lease.",
-    run: async () => { S.T = 14; render(); await reaperCheck(); } },
-  { title: "The reaper puts B back at the front of the queue", cmd: "EVAL requeue.lua   # inside Redis, all at once:\n  LREM jobs:processing 1 B   (returns 1, so nobody acked it)\n  HDEL jobs:claims B\n  LPUSH jobs:queue B",
+    run: async () => { S.T = 14; render(); await restorerCheck(); } },
+  { title: "The restorer puts B back at the front of the queue", cmd: "EVAL requeue.lua   # inside Redis, all at once:\n  LREM jobs:processing 1 B   (returns 1, so nobody acked it)\n  HDEL jobs:claims B\n  LPUSH jobs:queue B",
     text: "A small Lua script does the check and the move atomically. If the worker had acknowledged B a moment earlier, <code>LREM</code> would return 0 and the script would leave it alone. <code>LPUSH</code> puts B at the front because it has already waited.",
-    run: async () => { await reaperRequeue("B"); } },
+    run: async () => { await restorerRequeue("B"); } },
   { title: "Worker 1 picks B up and finishes it", cmd: "BLMOVE … → B      (try 2)\nSET result:B …\nLREM jobs:processing 1 B",
     text: "Every job has a result, even though a worker died. Nothing was lost.",
     run: async () => { S.T = 15; await claim("w1"); S.T = 17; await finish("w1"); } },
   { title: "What if Worker 2 was only slow, not dead?", cmd: "# both workers finish B:\nSET result:B …   # w1\nSET result:B …   # w2, same answer\nLREM … → 0       # w2's ack finds nothing: harmless",
-    text: "The reaper can't tell slow from dead. If the lease runs out on a slow worker, the job runs twice. That's fine here because the second <code>SET</code> writes the same answer. This is <b>at-least-once</b> processing. Long jobs call <code>heartbeat()</code> to refresh <code>at</code> so this rarely happens. (A supervisor such as systemd or Kubernetes restarts the crashed worker.)",
+    text: "The restorer can't tell slow from dead. If the lease runs out on a slow worker, the job runs twice. That's fine here because the second <code>SET</code> writes the same answer. This is <b>at-least-once</b> processing. Long jobs call <code>heartbeat()</code> to refresh <code>at</code> so this rarely happens. (A supervisor such as systemd or Kubernetes restarts the crashed worker.)",
     run: async () => { S.T = 20; S.w.w2 = { st: "idle", job: null }; render(); await wait(400); } },
   { title: "A poison job: D crashes every worker that touches it", cmd: "HGET jobs:attempts D   → 3\n# requeue.lua: tries >= MAX_ATTEMPTS\nRPUSH jobs:dead D",
-    text: "Suppose image D is corrupt and kills any worker that opens it. D has already crashed workers twice. On the third crash the reaper sees 3 attempts and moves D to a <b>dead-letter</b> list instead of back into the queue, so a person can look at it. Without this, D would crash workers forever.",
+    text: "Suppose image D is corrupt and kills any worker that opens it. D has already crashed workers twice. On the third crash the restorer sees 3 attempts and moves D to a <b>dead-letter</b> list instead of back into the queue, so a person can look at it. Without this, D would crash workers forever.",
     run: async () => {
       await push("D"); S.T = 21; await claim("w2"); S.tries.D = 3; render(); await wait(400);
-      S.T = 22; await crash("w2"); S.T = 33; render(); await reaperCheck(); await reaperRequeue("D");
+      S.T = 22; await crash("w2"); S.T = 33; render(); await restorerCheck(); await restorerRequeue("D");
     } },
 ];
 
 let i = 0, playing = false, busy = false;
 STEPS.forEach((s, k) => { const li = document.createElement("li"); li.textContent = s.title; li.onclick = () => jump(k + 1); $("steps").appendChild(li); });
 function caption(k) {
-  const s = k == null ? { title: "Two workers, a crash and a reaper", text: "Press <b>Play</b>, or <b>Next</b> to go one step at a time. Click any step to jump there." } : STEPS[k];
+  const s = k == null ? { title: "Two workers, a crash and a restorer", text: "Press <b>Play</b>, or <b>Next</b> to go one step at a time. Click any step to jump there." } : STEPS[k];
   $("c-no").textContent = k == null ? `${STEPS.length} steps` : `Step ${k + 1} of ${STEPS.length}`;
   $("c-title").textContent = s.title; $("c-cmd").textContent = s.cmd || ""; $("c-text").innerHTML = s.text;
   [...$("steps").children].forEach((li, n) => li.className = k != null && n < k ? "done" : n === k ? "now" : "");

@@ -1,4 +1,4 @@
-"""A reliable work queue on Redis lists: claim -> process -> acknowledge, plus a reaper.
+"""A reliable work queue on Redis lists: claim -> process -> acknowledge, plus a restorer.
 
 Keys:
   jobs:queue       list   jobs waiting for a worker
@@ -50,14 +50,14 @@ def claim(r, worker, timeout=5):
     if job is None:
         return None
     jid = job_id(job)
-    # If the worker dies between BLMOVE and this HSET, the reaper still finds the job (see reap()).
+    # If the worker dies between BLMOVE and this HSET, the restorer still finds the job (see restore()).
     r.hset(CLAIMS, jid, json.dumps({"worker": worker, "at": time.time()}))
     r.hincrby(ATTEMPTS, jid, 1)
     return job
 
 
 def heartbeat(r, job, worker):
-    """Call during long work so the reaper knows this worker is still alive."""
+    """Call during long work so the restorer knows this worker is still alive."""
     r.hset(CLAIMS, job_id(job), json.dumps({"worker": worker, "at": time.time()}))
 
 
@@ -87,7 +87,7 @@ return 1
 """
 
 
-def reap(r, now=None):
+def restore(r, now=None):
     """Find abandoned jobs in the processing list and put them back at the front of the queue.
 
     Returns a list of (job id, what happened) for printing.
