@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MapReduce, Step by Step</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+/* Layout: header · 1 two-server walk-through (diagram + size bars + steps) · 2 eight machines, whole book (floating sizes) · size summary · 3 the real system · in Spark */
+:root {
+  --bg: #f2f3f6; --surface: #ffffff; --ink: #161a22; --muted: #5a6373; --line: #d3d8e1;
+  --p1: #1f63c4; --p1-bg: #e7effb;
+  --p2: #b4520e; --p2-bg: #fcefe3;
+  --good: #0d7a50; --good-bg: #e1f4eb;
+  --bad: #b42318; --bad-bg: #fdeceb;
+  --hl: #6b3fc4; --hl-bg: #efe9fb;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+    --p1: #74a9ff; --p1-bg: #17253b; --p2: #ffa45e; --p2-bg: #2f1f12;
+    --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+    --hl: #b79bff; --hl-bg: #241c38; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1218; --surface: #171b23; --ink: #e8eaef; --muted: #9aa3b2; --line: #2c323e;
+  --p1: #74a9ff; --p1-bg: #17253b; --p2: #ffa45e; --p2-bg: #2f1f12;
+  --good: #43d199; --good-bg: #112a20; --bad: #ff7f74; --bad-bg: #331816;
+  --hl: #b79bff; --hl-bg: #241c38; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 17px; line-height: 1.5; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-block: 28px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+h1, h2, h3 { font-family: var(--f-display); letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+h1 { font-size: clamp(32px, 5vw, 54px); font-weight: 800; line-height: 1.02; }
+h1 .m { color: var(--p1); } h1 .r { color: var(--p2); }
+h2 { font-size: clamp(23px, 2.8vw, 32px); font-weight: 800; }
+h3 { font-size: 19px; font-weight: 600; }
+p { margin: 0; max-width: 76ch; }
+a { color: var(--p1); }
+code, pre { font-family: var(--f-mono); font-size: 0.86em; }
+.credit { color: var(--muted); font-size: 13px; font-style: italic; }
+header.top { display: grid; gap: 14px; }
+.eyebrow { font-family: var(--f-mono); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--p2); }
+.flow4 { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-family: var(--f-mono); font-size: 14px; }
+.flow4 span { padding: 4px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.flow4 i { color: var(--muted); font-style: normal; }
+section.stage { margin-top: 56px; display: grid; gap: 14px; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.diagram { overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 860px; height: auto; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.controls button { font: inherit; font-size: 15px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.controls button.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); font-weight: 700; min-width: 86px; }
+.controls button:disabled { opacity: .45; cursor: default; }
+.controls button:focus-visible, ol.steps li:focus-visible { outline: 2px solid var(--p1); outline-offset: 2px; }
+.controls .count { margin-left: auto; font-family: var(--f-mono); font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.two { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 860px) { .two { grid-template-columns: minmax(0, 1fr); } }
+.caption { padding: 14px 16px; display: grid; gap: 8px; min-width: 0; }
+.caption .stepno { font-family: var(--f-mono); font-size: 12px; color: var(--muted); }
+.caption .txt { font-size: 16px; }
+ol.steps { margin: 0; padding: 14px 14px 14px 38px; display: grid; gap: 3px; font-size: 15px; color: var(--muted); }
+ol.steps li { padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+ol.steps li.done { color: var(--ink); }
+ol.steps li.now { color: var(--ink); background: var(--hl-bg); font-weight: 700; }
+pre { margin: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; overflow-x: auto; line-height: 1.45; }
+.note { font-size: 15px; color: var(--muted); }
+.k { font-family: var(--f-mono); font-size: .9em; }
+.c1 { color: var(--p1); font-weight: 700; } .c2 { color: var(--p2); font-weight: 700; } .cg { color: var(--good); font-weight: 700; } .cb { color: var(--bad); font-weight: 700; }
+
+/* size bars (section 1) */
+.bars { padding: 14px 16px 16px; display: grid; gap: 8px; }
+.bars h3 { font-size: 16px; }
+.brow { display: grid; grid-template-columns: 84px minmax(0, 1fr) 70px; gap: 10px; align-items: center; font-size: 14px; }
+.brow .lbl { font-family: var(--f-display); font-weight: 600; }
+.brow .val { font-family: var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.track { position: relative; height: 20px; background: var(--bg); border-radius: 4px; }
+.fill { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: 4px; transition: width .8s ease, background-color .4s; }
+.ref { position: absolute; top: -5px; bottom: -5px; border-left: 2px dashed var(--bad); }
+.reflbl { font-size: 12.5px; color: var(--bad); font-family: var(--f-mono); }
+
+/* summary chart (section 2) */
+.sum { padding: 16px; display: grid; gap: 12px; }
+.srow { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 12px; align-items: center; }
+.srow .lbl { font-family: var(--f-display); font-weight: 600; font-size: 15px; line-height: 1.2; }
+.srow .lbl small { display: block; font-family: var(--f-body); font-weight: 400; color: var(--muted); font-size: 12.5px; }
+.sbars { display: grid; gap: 4px; }
+.sbar { display: flex; align-items: center; gap: 8px; font-family: var(--f-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.sbar b { display: block; height: 16px; border-radius: 3px; min-width: 2px; }
+.sbar.tot b { background: var(--p1); } .sbar.one b { background: var(--p2); } .sbar.comb b { background: var(--good); }
+.legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13.5px; color: var(--muted); }
+.legend span::before { content: ""; display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--c); }
+@media (max-width: 600px) { .srow { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+
+/* SVG */
+svg text { font-family: var(--f-body); }
+.box { fill: var(--surface); stroke: var(--line); stroke-width: 2; transition: fill .4s, stroke .4s, opacity .5s; }
+.lane { fill: var(--bg); stroke: var(--line); stroke-dasharray: 5 4; }
+.box.on { stroke: var(--hl); fill: var(--hl-bg); }
+.box.dead { stroke: var(--bad); fill: var(--bad-bg); }
+.t { font-family: var(--f-display); font-weight: 600; font-size: 17px; fill: var(--ink); }
+.t.big { font-size: 20px; font-weight: 800; }
+.s { font-family: var(--f-mono); font-size: 11.5px; fill: var(--muted); }
+.badge { font-family: var(--f-mono); font-weight: 700; font-size: 14px; fill: var(--hl); text-anchor: end; font-variant-numeric: tabular-nums; }
+.mv { transition: transform 1s cubic-bezier(.45,.05,.3,1), opacity .6s ease; }
+.chip rect { stroke-width: 1.4; }
+.chip text { font-family: var(--f-mono); font-size: 11.5px; dominant-baseline: central; }
+.chip.p1 rect { fill: var(--p1-bg); stroke: var(--p1); } .chip.p1 text { fill: var(--p1); }
+.chip.p2 rect { fill: var(--p2-bg); stroke: var(--p2); } .chip.p2 text { fill: var(--p2); }
+.chip.res rect { stroke-width: 2.2; }
+.chip text .n { font-weight: 700; fill: var(--ink); }
+.fo { font-family: var(--f-body); color: var(--ink); font-size: 13.5px; line-height: 1.38; }
+.fo .ref { position: static; border: 0; font-family: var(--f-mono); font-size: 11px; color: var(--muted); display: block; }
+.tiny { font-family: var(--f-mono); font-size: 6.2px; line-height: 1.25; color: var(--muted); overflow: hidden; height: 100%; word-break: break-word; transition: opacity .8s; }
+.arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; transition: opacity .5s; }
+.arrow.hot { stroke: var(--hl); stroke-width: 2.4; }
+.wire { stroke: var(--hl); fill: none; transition: opacity .6s; }
+.pkt rect { fill: var(--hl); }
+.pkt text { font-family: var(--f-mono); font-weight: 700; font-size: 13px; fill: var(--surface); text-anchor: middle; dominant-baseline: central; }
+.pkt.green rect { fill: var(--good); }
+.pkt.orange rect { fill: var(--p2); }
+.sub { font-family: var(--f-mono); font-size: 11px; fill: var(--ink); transition: opacity .5s; }
+.sub.mut { fill: var(--muted); }
+.disk { fill: var(--bg); stroke: var(--line); stroke-width: 1.4; }
+.file1 { fill: var(--p1-bg); stroke: var(--p1); stroke-width: 1.4; } .file2 { fill: var(--p2-bg); stroke: var(--p2); stroke-width: 1.4; }
+.ftxt { font-family: var(--f-mono); font-size: 10.5px; font-weight: 700; text-anchor: middle; dominant-baseline: central; }
+.ftxt.a { fill: var(--p1); } .ftxt.b { fill: var(--p2); }
+.x { stroke: var(--bad); stroke-width: 6; stroke-linecap: round; transition: opacity .4s; }
+.hide { opacity: 0; }
+.dim { opacity: .28; }
+@media (prefers-reduced-motion: reduce) { .mv, .fill, .box, .arrow, .wire, .sub, .tiny { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">CS 452 · Big Data · Wednesday 11/11</div>
+  <h1><span class="m">Map</span><span class="r">Reduce</span>, step by step</h1>
+  <p>Counting words in a book is easy on one machine. Counting words in the whole web is not. MapReduce splits one huge job into many small ones, runs them on many machines at once, and then combines the answers. Every MapReduce job has the same four moves:</p>
+  <div class="flow4"><span>Split</span><i>→</i><span>Map: emit (key, value)</span><i>→</i><span>Shuffle: same key, same machine</span><i>→</i><span>Reduce: combine each key</span></div>
+  <p class="credit">[Page created using Claude by Professor Reynolds] · Text: Book of Mormon, Project Gutenberg eBook #17. Sizes are real bytes, counted as plain text: a pair is the word, a tab, the count and a newline. Part 2's numbers: <a href="https://github.com/byu-cs-452/byu-cs-452-class-content/blob/main/sparksql/data/mapreduce_stats.py" target="_blank" rel="noopener">mapreduce_stats.py</a>.</p>
+</header>
+
+<!-- ============ 1 ============ -->
+<section class="stage" id="two">
+  <div class="eyebrow">Part 1 · Two servers, two verses</div>
+  <h2>Word count on Alma 37:6–7</h2>
+  <p>Two verses with lots of repeated words (<em>small</em>, <em>means</em>, <em>doth</em>, <em>confound</em>, <em>wise</em>…) spread across both servers. Watch the colors: <span class="c1">blue words</span> start with a–l and belong to Server 1's reducer; <span class="c2">orange words</span> start with m–z and belong to Server 2's.</p>
+  <div class="controls" data-for="1">
+    <button type="button" data-a="reset">Reset</button><button type="button" data-a="back">Back</button><button type="button" class="primary" data-a="play">Play</button><button type="button" data-a="next">Next</button><span class="count"></span>
+  </div>
+  <div class="panel diagram"><svg id="sv1" viewBox="0 0 1200 820" role="img" aria-label="A driver sends two verses to Server 1 and Server 2, which map them to word pairs, shuffle the pairs by first letter, reduce them to counts and send the counts back to the driver"></svg></div>
+  <div class="two">
+    <div class="panel caption" id="cap1"><div class="stepno"></div><h3></h3><div class="txt"></div></div>
+    <div class="panel bars" id="bars1">
+      <h3>Bytes on each machine right now</h3>
+      <div class="brow"><span class="lbl">Driver</span><div class="track"><div class="fill" style="background:var(--hl)"></div><div class="ref"></div></div><span class="val"></span></div>
+      <div class="brow"><span class="lbl">Server 1</span><div class="track"><div class="fill" style="background:var(--p1)"></div><div class="ref"></div></div><span class="val"></span></div>
+      <div class="brow"><span class="lbl">Server 2</span><div class="track"><div class="fill" style="background:var(--p2)"></div><div class="ref"></div></div><span class="val"></span></div>
+      <div class="reflbl"></div>
+    </div>
+  </div>
+  <div class="panel"><ol class="steps" id="steps1"></ol></div>
+</section>
+
+<!-- ============ 2 ============ -->
+<section class="stage" id="eight">
+  <div class="eyebrow">Part 2 · Eight machines, the whole book</div>
+  <h2>Word count on the entire Book of Mormon</h2>
+  <p>Same job, real scale: 1.47 MB of text and 269,413 words on 8 machines. The text is too small to read now, so follow the numbers that travel with the data. Every number comes from running <a href="https://github.com/byu-cs-452/byu-cs-452-class-content/blob/main/sparksql/data/mapreduce_stats.py" target="_blank" rel="noopener">mapreduce_stats.py</a> on the book, so you can rerun it yourself.</p>
+  <div class="controls" data-for="2">
+    <button type="button" data-a="reset">Reset</button><button type="button" data-a="back">Back</button><button type="button" class="primary" data-a="play">Play</button><button type="button" data-a="next">Next</button><span class="count"></span>
+  </div>
+  <div class="panel diagram"><svg id="sv2" viewBox="0 0 1200 790" role="img" aria-label="The Book of Mormon file is split into 8 chunks sent to 8 mappers, shuffled to 8 reducers by hash of the word, reduced, and the counts sent to the driver"></svg></div>
+  <div class="two">
+    <div class="panel caption" id="cap2"><div class="stepno"></div><h3></h3><div class="txt"></div></div>
+    <div class="panel"><ol class="steps" id="steps2"></ol></div>
+  </div>
+  <div class="panel sum" id="sum">
+    <h3>How much data at each step (8 machines)</h3>
+    <div class="legend"><span style="--c:var(--p1)">All machines together</span><span style="--c:var(--p2)">The busiest single machine</span><span style="--c:var(--good)">With a combiner (Part 3)</span></div>
+    <div id="sumrows" class="sum" style="padding:0"></div>
+    <p class="note">The answer (57 KB) is smaller than one machine's input chunk (183 KB). The map output is bigger than the text, because every word becomes its own pair. That is why real systems add a combiner before the shuffle.</p>
+  </div>
+</section>
+
+<!-- ============ 3 ============ -->
+<section class="stage" id="real">
+  <div class="eyebrow">Part 3 · What a real MapReduce system does</div>
+  <h2>Master, workers, local disks and failures</h2>
+  <p>Google's 2004 MapReduce paper (and Hadoop, built from it) adds the parts a real cluster needs: a distributed file system, a master that tracks every task, sorting and spilling to disk, a combiner, and re-running work when a machine dies.</p>
+  <div class="controls" data-for="3">
+    <button type="button" data-a="reset">Reset</button><button type="button" data-a="back">Back</button><button type="button" class="primary" data-a="play">Play</button><button type="button" data-a="next">Next</button><span class="count"></span>
+  </div>
+  <div class="panel diagram"><svg id="sv3" viewBox="0 0 1200 700" role="img" aria-label="A master assigns map tasks to three workers that read splits from a distributed file system, write sorted partitions to local disk, one worker dies and its task is re-run, reducers fetch partitions, sort, reduce and write output files"></svg></div>
+  <div class="two">
+    <div class="panel caption" id="cap3"><div class="stepno"></div><h3></h3><div class="txt"></div></div>
+    <div class="panel"><ol class="steps" id="steps3"></ol></div>
+  </div>
+</section>
+
+<section class="stage">
+  <div class="eyebrow">Try it</div>
+  <h2>The same four moves in Spark</h2>
+  <pre><span style="color:var(--muted)"># Split: textFile reads the file in partitions, one per machine</span>
+lines = sc.textFile("bookOfMormon.txt")
+<span style="color:var(--muted)"># Map: one (word, 1) pair per word</span>
+pairs = lines.flatMap(lambda line: line.lower().split()).map(lambda w: (w, 1))
+<span style="color:var(--muted)"># Shuffle + Reduce: reduceByKey combines on each machine first, then shuffles and sums</span>
+counts = pairs.reduceByKey(lambda a, b: a + b)
+counts.sortBy(lambda t: t[1], False).take(10)</pre>
+  <p><a href="https://colab.research.google.com/github/byu-cs-452/byu-cs-452-class-content/blob/main/sparksql/00%20-%20InClassIntro.ipynb" target="_blank" rel="noopener">Open the in-class notebook in Google Colab</a> · <a href="https://github.com/byu-cs-452/byu-cs-452-class-content/blob/main/sparksql/related_learning/big_data_processing.md" target="_blank" rel="noopener">Big Data &amp; MapReduce reading</a> · <a href="https://research.google/pubs/mapreduce-simplified-data-processing-on-large-clusters/" target="_blank" rel="noopener">MapReduce paper (Dean &amp; Ghemawat, 2004)</a></p>
+</section>
+</div>
+
+<script>
+const BIG = {"shuffle":[[23659,27867,28377,23006,34927,38861,38231,27013],[24577,27194,25972,24216,31626,37601,41735,27526],[23111,23339,27626,21288,36986,41488,39254,27740],[22048,23546,28551,22735,37196,38518,41194,27863],[21130,24950,27320,22859,38352,37277,41250,27249],[19750,26831,25842,22891,42863,38410,39198,24840],[22684,28582,23839,22069,34292,41633,39270,28117],[21853,24943,26985,22391,36153,39782,40991,28574]],"shufC":[[2311,2556,2301,2251,2524,2474,2407,2440],[2783,3126,2794,2778,3145,3201,3051,3317],[2721,2568,2663,2308,2725,2661,2642,2821],[2493,2555,2465,2540,2719,2608,2638,2659],[2711,2708,2553,2572,2748,2903,2867,2783],[2392,2497,2445,2060,2599,2592,2378,2538],[2450,2685,2508,2316,2694,2695,2726,2487],[2403,2446,2494,2397,2822,2705,2673,2704]],"total":1467821,"words":269413,"distinct":5575,"mappers":[{"bytes":183489,"words":34165,"distinct":2013,"map":241941,"comb":19264,"sample":"THE BOOK OF MORMON An Account Written BY THE HAND OF MORMON UPON PLATES TAKEN FROM THE PLATES OF NEPHI Wherefore, it is an abridgment of the record of the people of Nephi, and also of the Lamanites\u2014Written to the Lamanites, who are a remnant of the house of Israel; and also to Jew and Gentile\u2014Written by way of commandment, and also by the spirit of prophecy and of revelation\u2014Written"},{"bytes":183524,"words":33719,"distinct":2520,"map":240447,"comb":24195,"sample":"kindled. This shall ye have of mine hand\u2014ye shall lie down in sorrow. 2 Nephi Chapter 8 8:1 Hearken unto me, ye that follow after righteousness. Look unto the rock from whence ye are hewn, and to the hole of the pit from whence ye are digged. 8:2 Look unto Abraham, your father, and unto Sarah, she that bare you; for I called him alone, and blessed him. 8:3 For"},{"bytes":183450,"words":33532,"distinct":2168,"map":240832,"comb":21109,"sample":"lived to see his death; and Benjamin, his son, reigneth in his stead. 1:24 And behold, I have seen, in the days of king Benjamin, a serious war and much bloodshed between the Nephites and the Lamanites. But behold, the Nephites did obtain much advantage over them; yea, insomuch that king Benjamin did drive them out of the land of Zarahemla. 1:25 And it came to pass that I began"},{"bytes":183514,"words":33724,"distinct":2128,"map":241651,"comb":20677,"sample":"cause of much affliction to the church; yea, it was the cause of much trial with the church. 1:24 For the hearts of many were hardened, and their names were blotted out, that they were remembered no more among the people of God. And also many withdrew themselves from among them. 1:25 Now this was a great trial to those that did stand fast in the faith; nevertheless, they were"},{"bytes":183460,"words":33429,"distinct":2216,"map":240387,"comb":21845,"sample":"Behold, who can glory too much in the Lord? Yea, who can say too much of his great power, and of his mercy, and of his long-suffering towards the children of men? Behold, I say unto you, I cannot say the smallest part which I feel. 26:17 Who could have supposed that our God would have been so merciful as to have snatched us from our awful, sinful, and polluted"},{"bytes":183467,"words":33243,"distinct":2002,"map":240625,"comb":19501,"sample":"their cities, and to take up arms in defence of their country. 51:21 And thus Moroni put an end to those king-men, that there were not any known by the appellation of king-men; and thus he put an end to the stubbornness and the pride of those people who professed the blood of nobility; but they were brought down to humble themselves like unto their brethren, and to fight valiantly"},{"bytes":183466,"words":33683,"distinct":2139,"map":240486,"comb":20561,"sample":"behold your utter destruction; and this shall surely come except ye repent, saith the Lord; and those of the fourth generation shall visit your destruction. 13:11 But if ye will repent and return unto the Lord your God I will turn away mine anger, saith the Lord; yea, thus saith the Lord, blessed are they who will repent and turn unto me, but wo unto him that repenteth not. 13:12"},{"bytes":183451,"words":33918,"distinct":2152,"map":241672,"comb":20644,"sample":"did wax strong, and did multiply exceedingly fast, and became an exceedingly fair and delightsome people. 4 Nephi 1:11 And they were married, and given in marriage, and were blessed according to the multitude of the promises which the Lord had made unto them. 4 Nephi 1:12 And they did not walk any more after the performances and ordinances of the law of Moses; but they did walk after the"}],"reducers":[{"keys":680,"out":6980,"inp":178812,"inpComb":20264,"top":[["them",2651],["for",2522],["have",1788]]},{"keys":702,"out":7258,"inp":207252,"inpComb":21141,"top":[["i",3317],["shall",2489],["were",2018]]},{"keys":682,"out":7022,"inp":214512,"inpComb":20223,"top":[["of",11811],["his",2254],["by",1198]]},{"keys":661,"out":6751,"inp":181455,"inpComb":19222,"top":[["unto",3643],["their",2807],["a",2146]]},{"keys":716,"out":7327,"inp":292395,"inpComb":21976,"top":[["that",6889],["to",6455],["it",3085]]},{"keys":711,"out":7310,"inp":313570,"inpComb":21839,"top":[["and",16368],["they",4491],["be",2512]]},{"keys":686,"out":7017,"inp":321123,"inpComb":21382,"top":[["the",19250],["in",3697],["people",1761]]},{"keys":737,"out":7430,"inp":218922,"inpComb":21749,"top":[["he",3178],["which",2217],["ye",2012]]}],"top":[["the",19250],["and",16368],["of",11811],["that",6889],["to",6455],["they",4491],["in",3697],["unto",3643],["i",3317],["he",3178],["it",3085],["their",2807],["them",2651],["for",2522],["be",2512]],"out":57095};
+const NS = "http://www.w3.org/2000/svg";
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+function el(tag, attrs, parent) { const e = document.createElementNS(NS, tag); for (const k in attrs || {}) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+function txt(parent, x, y, cls, s, extra) { const t = el("text", Object.assign({ x, y, class: cls }, extra || {}), parent); t.textContent = s; return t; }
+function fo(parent, x, y, w, h, html, cls) { const f = el("foreignObject", { x, y, width: w, height: h }, parent); const d = document.createElement("div"); d.className = cls || "fo"; d.innerHTML = html; f.appendChild(d); return { f, d }; }
+function put(g, x, y, o, delay) { g.style.transform = `translate(${x}px, ${y}px)`; if (o != null) g.style.opacity = o; g.style.transitionDelay = (delay || 0) + "ms"; }
+const fmtB = n => n.toLocaleString("en-US") + " B";
+const fmtK = n => n >= 1e6 ? (n / 1e6).toFixed(2) + " MB" : (n / 1000).toFixed(1) + " KB";
+function countTo(node, to, fmt) {
+  if (to == null) { node.textContent = ""; node._v = 0; return; }
+  const from = node._v || 0; node._v = to;
+  if (reduceMotion || from === to) { node.textContent = fmt(to); return; }
+  const t0 = performance.now(), dur = 900;
+  const tick = now => { const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3); node.textContent = fmt(Math.round(from + (to - from) * e)); if (p < 1 && node._v === to) requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+}
+
+/* ---------- step player ---------- */
+function player(n, steps, show) {
+  const ctl = document.querySelector(`.controls[data-for="${n}"]`), cap = document.getElementById("cap" + n), ol = document.getElementById("steps" + n);
+  let k = 0, timer = null;
+  steps.forEach((s, i) => { const li = document.createElement("li"); li.textContent = s.t; li.tabIndex = 0; li.onclick = () => { stop(); go(i); }; li.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); stop(); go(i); } }; ol.appendChild(li); });
+  const btn = a => ctl.querySelector(`[data-a="${a}"]`);
+  function go(i) {
+    k = Math.max(0, Math.min(steps.length - 1, i)); show(k);
+    cap.querySelector(".stepno").textContent = `Step ${k + 1} of ${steps.length}`;
+    cap.querySelector("h3").textContent = steps[k].t; cap.querySelector(".txt").innerHTML = steps[k].d;
+    [...ol.children].forEach((li, j) => li.className = j < k ? "done" : j === k ? "now" : "");
+    ctl.querySelector(".count").textContent = `${k + 1} / ${steps.length}`;
+    btn("back").disabled = k === 0; btn("next").disabled = k === steps.length - 1;
+    if (k === steps.length - 1) stop();
+  }
+  function stop() { clearInterval(timer); timer = null; btn("play").textContent = "Play"; }
+  btn("play").onclick = () => { if (timer) return stop(); if (k === steps.length - 1) go(0); btn("play").textContent = "Pause"; timer = setInterval(() => go(k + 1), 3400); };
+  btn("next").onclick = () => { stop(); go(k + 1); };
+  btn("back").onclick = () => { stop(); go(k - 1); };
+  btn("reset").onclick = () => { stop(); go(0); };
+  go(0);
+}
+
+/* =================== PART 1 =================== */
+(function () {
+  const V = [
+    { ref: "Alma 37:6", s: "Now ye may suppose that this is foolishness in me; but behold I say unto you, that by small and simple things are great things brought to pass; and small means in many instances doth confound the wise." },
+    { ref: "Alma 37:7", s: "And the Lord God doth work by means to bring about his great and eternal purposes; and by very small means the Lord doth confound the wise and bringeth about the salvation of many souls." }];
+  const tok = s => s.toLowerCase().match(/[a-z']+/g);
+  const enc = new TextEncoder(), bytes = s => enc.encode(s).length;
+  const part = w => (w[0] <= "l" ? 0 : 1);
+  const pairB = w => w.length + 3, outB = (w, c) => w.length + String(c).length + 2;
+  const CW = 7.0, chipW = s => s.length * CW + 12, CH = 19;
+  const svg = document.getElementById("sv1");
+  const D = { x: 20, y: 14, w: 1160, h: 180 };
+  const laneY = [220, 520];
+  const COL = [{ x: 40, w: 300, name: "Input chunk" }, { x: 360, w: 400, name: "Map output: (word, 1)" }, { x: 780, w: 400, name: "" }];
+  const colY = ly => ly + 38, colH = 236;
+
+  // driver
+  el("rect", { x: D.x, y: D.y, width: D.w, height: D.h, rx: 12, class: "box", id: "d1" }, svg);
+  txt(svg, D.x + 16, D.y + 28, "t big", "Driver");
+  txt(svg, D.x + 92, D.y + 28, "s", "starts the job · gets the answer");
+  const bD = txt(svg, D.x + D.w - 16, D.y + 28, "badge", "");
+  const dNote = txt(svg, D.x + 660, D.y + 100, "s", "");
+  // lanes
+  const badges = [[], []], colBoxes = [[], []], redTitle = [];
+  laneY.forEach((ly, i) => {
+    el("rect", { x: 20, y: ly, width: 1160, height: 280, rx: 14, class: "lane" }, svg);
+    txt(svg, 34, ly + 26, "t big", "Server " + (i + 1));
+    txt(svg, 132, ly + 26, "s", i === 0 ? "reducer owns words a–l" : "reducer owns words m–z");
+    COL.forEach((c, j) => {
+      colBoxes[i][j] = el("rect", { x: c.x, y: colY(ly), width: c.w, height: colH, rx: 10, class: "box" }, svg);
+      const t = txt(svg, c.x + 12, colY(ly) + 22, "t", j === 2 ? "Reduce: words " + (i ? "m–z" : "a–l") : c.name);
+      t.style.fontSize = "15px"; if (j === 2) redTitle[i] = t;
+      badges[i][j] = txt(svg, c.x + c.w - 12, colY(ly) + 22, "badge", "");
+    });
+  });
+  // arrows
+  const A = [];
+  const arrow = (d, cls) => { const p = el("path", { d, class: "arrow " + (cls || ""), "marker-end": "url(#ah1)" }, svg); A.push(p); return p; };
+  const defs = el("defs", {}, svg); const mk = el("marker", { id: "ah1", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs); el("path", { d: "M0,0 L10,5 L0,10 z", style: "fill:var(--muted)" }, mk);
+  const aSplit = [arrow(`M190,${D.y + D.h} L190,${colY(laneY[0]) - 2}`), arrow(`M300,${D.y + D.h} C300,${D.y + D.h + 30} 300,480 300,${colY(laneY[1]) - 2}`)];
+  aSplit[1].setAttribute("d", `M30,${D.y + D.h} C6,320 6,560 38,${colY(laneY[1]) + 24}`);
+  const aMap = laneY.map(ly => arrow(`M340,${colY(ly) + 118} L358,${colY(ly) + 118}`));
+  const aSh = [arrow(`M760,${colY(laneY[0]) + 118} L778,${colY(laneY[0]) + 118}`, "hot"), arrow(`M760,${colY(laneY[1]) + 118} L778,${colY(laneY[1]) + 118}`, "hot"),
+    arrow(`M740,${colY(laneY[0]) + colH} C740,${laneY[1] - 10} 800,${laneY[1] - 20} 820,${colY(laneY[1]) - 2}`, "hot"),
+    arrow(`M720,${colY(laneY[1])} C720,${laneY[0] + 300} 800,${laneY[0] + 300} 860,${colY(laneY[0]) + colH + 2}`, "hot")];
+  const aRes = [arrow(`M1000,${colY(laneY[0]) - 2} L1000,${D.y + D.h + 2}`), arrow(`M1182,${colY(laneY[1]) + 20} C1196,500 1196,260 1170,${D.y + D.h + 2}`)];
+
+  // chunks
+  const chunks = V.map((v, i) => { const g = el("g", { class: "mv" }, svg); const o = fo(g, 0, 0, 280, 200, `<span class="ref">${v.ref} · ${bytes(v.s)} bytes</span>${v.s}`); return { g, d: o.d, b: bytes(v.s) }; });
+  // pair chips
+  const pairs = [], words = V.map(v => tok(v.s));
+  words.forEach((ws, lane) => ws.forEach(w => {
+    const g = el("g", { class: "chip mv p" + (part(w) + 1) }, svg); const label = w + " 1";
+    el("rect", { width: chipW(label), height: CH, rx: 4 }, g);
+    const t = el("text", { x: 6, y: CH / 2 }, g); t.appendChild(document.createTextNode(w + " ")); const n = el("tspan", { class: "n" }, t); n.textContent = "1";
+    pairs.push({ g, w, lane, to: part(w), wd: chipW(label) });
+  }));
+  // results
+  const cnt = new Map(); words.flat().forEach(w => cnt.set(w, (cnt.get(w) || 0) + 1));
+  const keys = [...cnt.keys()].sort();
+  const results = keys.map(w => {
+    const c = cnt.get(w), label = w + " " + c, g = el("g", { class: "chip res mv p" + (part(w) + 1) }, svg);
+    el("rect", { width: chipW(label), height: CH, rx: 4 }, g);
+    const t = el("text", { x: 6, y: CH / 2 }, g); t.appendChild(document.createTextNode(w + " ")); const n = el("tspan", { class: "n" }, t); n.textContent = c;
+    return { g, w, c, to: part(w), wd: chipW(label) };
+  });
+  function flow(items, x0, y0, W, getW, gap = 6, rowH = CH + 6) { let x = x0, y = y0; const pos = []; items.forEach(it => { const w = getW(it); if (x + w > x0 + W) { x = x0; y += rowH; } pos.push([x, y]); x += w + gap; }); return pos; }
+  // precompute layouts
+  pairs.forEach(p => p.mapPos = null);
+  [0, 1].forEach(l => { const mine = pairs.filter(p => p.lane === l); flow(mine, COL[1].x + 12, colY(laneY[l]) + 36, COL[1].w - 24, p => p.wd).forEach((xy, i) => mine[i].mapPos = xy); });
+  [0, 1].forEach(r => { const mine = pairs.filter(p => p.to === r).sort((a, b) => a.lane - b.lane); flow(mine, COL[2].x + 12, colY(laneY[r]) + 36, COL[2].w - 24, p => p.wd).forEach((xy, i) => mine[i].shPos = xy); });
+  [0, 1].forEach(r => {
+    const ks = keys.filter(w => part(w) === r);
+    const slots = flow(ks, COL[2].x + 12, colY(laneY[r]) + 40, COL[2].w - 24, w => chipW(w + " " + cnt.get(w)) + (cnt.get(w) - 1) * 4, 8, CH + 10);
+    ks.forEach((w, i) => { let j = 0; pairs.filter(p => p.w === w).forEach(p => { p.grpPos = [slots[i][0] + j * 4, slots[i][1] - j * 4]; j++; }); results.find(x => x.w === w).grpPos = [slots[i][0] + (cnt.get(w) - 1) * 4, slots[i][1] - (cnt.get(w) - 1) * 4]; });
+  });
+  const sorted = [...results].sort((a, b) => b.c - a.c || a.w.localeCompare(b.w));
+  flow(sorted, D.x + 16, D.y + 44, D.w - 32, r => r.wd, 6, CH + 7).forEach((xy, i) => sorted[i].finPos = xy);
+
+  // sizes
+  const mapB = [0, 1].map(l => words[l].reduce((s, w) => s + pairB(w), 0));
+  const shB = [0, 1].map(r => pairs.filter(p => p.to === r).reduce((s, p) => s + pairB(p.w), 0));
+  const redB = [0, 1].map(r => keys.filter(w => part(w) === r).reduce((s, w) => s + outB(w, cnt.get(w)), 0));
+  const total = chunks[0].b + chunks[1].b, minChunk = Math.min(chunks[0].b, chunks[1].b);
+  const hold = [[total, null, null], [null, chunks[0].b, chunks[1].b], [null, mapB[0], mapB[1]], [null, shB[0], shB[1]], [null, shB[0], shB[1]], [null, redB[0], redB[1]], [redB[0] + redB[1], null, null]];
+  const bars = document.querySelectorAll("#bars1 .brow"), MAXB = 420;
+  bars.forEach(b => b.querySelector(".ref").style.left = (minChunk / MAXB * 100) + "%");
+  document.querySelector("#bars1 .reflbl").textContent = `dashed line = smallest input chunk (${minChunk} B)`;
+
+  const steps = [
+    { t: "The driver has the text", d: `Two verses, ${total} bytes, all on one machine. On one machine you would just loop over the words and count. The point of MapReduce is to never need one machine that holds everything.` },
+    { t: "Split: send a chunk to each server", d: `The driver sends Alma 37:6 (${chunks[0].b} B) to Server 1 and Alma 37:7 (${chunks[1].b} B) to Server 2. Real systems split by size, not by meaning, so a chunk can end mid-sentence. Each server only ever sees its own chunk.` },
+    { t: "Map: each server makes (word, 1) pairs", d: `Each server reads its chunk and emits one pair per word, at the same time as the other server. The data got <b>bigger</b>: ${chunks[0].b} → ${mapB[0]} B on Server 1 and ${chunks[1].b} → ${mapB[1]} B on Server 2, because every word now carries a count. Notice <span class="k">small 1</span> shows up on both servers.` },
+    { t: "Shuffle: same word, same server", d: `Every pair goes to the server that owns its key: words starting a–l to Server 1, m–z to Server 2. Some pairs stay home and some cross the network. Now <b>every</b> <span class="k">small 1</span> is on Server 2 and every <span class="k">and 1</span> is on Server 1. Real systems use <span class="k">hash(word) mod 2</span> instead of the alphabet, so the load is spread evenly.` },
+    { t: "Sort and group by key", d: `Each server sorts its pairs so matching words sit together. The stacks show the duplicates: <span class="k">and</span> ×6, <span class="k">the</span> ×5, <span class="k">small</span>, <span class="k">means</span>, <span class="k">doth</span> and <span class="k">by</span> ×3.` },
+    { t: "Reduce: add up each stack", d: `Each stack becomes one pair with its total. Server 1 now holds ${redB[0]} B and Server 2 holds ${redB[1]} B. <b>Both are smaller than either input chunk</b> (${chunks[0].b} B and ${chunks[1].b} B). The more a text repeats itself, the bigger the savings.` },
+    { t: "Send the answer back to the driver", d: `Both servers send their counts to the driver: ${redB[0] + redB[1]} B in all, sorted by count. Neither server ever saw the whole text, and the driver never counted a single word.` }];
+
+  function show(k) {
+    svg.querySelector("#d1").setAttribute("class", "box" + (k === 0 || k === 6 ? " on" : ""));
+    colBoxes.forEach((row, i) => row.forEach((b, j) => b.setAttribute("class", "box" + ((k === 1 && j === 0) || (k === 2 && j === 1) || (k >= 3 && k <= 5 && j === 2) ? " on" : ""))));
+    chunks.forEach((c, i) => { if (k === 0) put(c.g, D.x + 16 + i * 300, D.y + 42, 1); else put(c.g, COL[0].x + 10, colY(laneY[i]) + 34, k === 1 ? 1 : k === 2 ? .35 : k <= 5 ? .12 : 0); });
+    dNote.textContent = k === 0 ? "← chunk 1 goes to Server 1 · chunk 2 goes to Server 2" : "";
+    pairs.forEach((p, i) => {
+      if (k <= 1) put(p.g, p.mapPos[0], p.mapPos[1], 0);
+      else if (k === 2) put(p.g, p.mapPos[0], p.mapPos[1], 1, i * 12);
+      else if (k === 3) put(p.g, p.shPos[0], p.shPos[1], 1, i * 10);
+      else if (k === 4) put(p.g, p.grpPos[0], p.grpPos[1], 1);
+      else put(p.g, p.grpPos[0], p.grpPos[1], 0);
+    });
+    results.forEach(r => { if (k <= 4) put(r.g, r.grpPos[0], r.grpPos[1], 0); else if (k === 5) put(r.g, r.grpPos[0], r.grpPos[1], 1, 300); else put(r.g, r.finPos[0], r.finPos[1], 1); });
+    A.forEach(a => a.style.opacity = .12);
+    if (k === 1) aSplit.forEach(a => a.style.opacity = 1);
+    if (k === 2) aMap.forEach(a => a.style.opacity = 1);
+    if (k === 3) aSh.forEach(a => a.style.opacity = 1);
+    if (k === 6) aRes.forEach(a => a.style.opacity = 1);
+    redTitle.forEach((t, i) => t.textContent = (k === 5 || k === 6 ? "Reduce output: words " : "Reduce: words ") + (i ? "m–z" : "a–l"));
+    countTo(bD, hold[k][0], fmtB);
+    [0, 1].forEach(i => {
+      countTo(badges[i][0], k >= 1 && k <= 5 ? chunks[i].b : null, fmtB);
+      countTo(badges[i][1], k >= 2 && k <= 5 ? mapB[i] : null, fmtB);
+      countTo(badges[i][2], k === 3 || k === 4 ? shB[i] : k === 5 ? redB[i] : null, fmtB);
+    });
+    hold[k].forEach((v, i) => { bars[i].querySelector(".fill").style.width = ((v || 0) / MAXB * 100) + "%"; bars[i].querySelector(".val").textContent = v ? v + " B" : "–"; });
+  }
+  player(1, steps, show);
+})();
+
+/* =================== PART 2 =================== */
+(function () {
+  const svg = document.getElementById("sv2"), M = BIG.mappers, R = BIG.reducers;
+  const tok = s => s.toLowerCase().match(/[a-z']+/g) || [];
+  const F = { x: 20, y: 290, w: 180, h: 210 }, MX = 250, MW = 250, RX = 770, RW = 230, OUT = { x: 1030, y: 210, w: 160, h: 370 };
+  const yOf = i => 18 + i * 96, BH = 82;
+  const sumMap = M.reduce((s, m) => s + m.map, 0);
+  const shufTot = R.map(r => r.inp);
+  const hot = shufTot.indexOf(Math.max(...shufTot));
+  // wires (shuffle matrix)
+  const wires = el("g", { class: "wire", style: "opacity:0" }, svg);
+  const maxCell = Math.max(...BIG.shuffle.flat());
+  BIG.shuffle.forEach((row, i) => row.forEach((b, r) => { const y1 = yOf(i) + BH / 2, y2 = yOf(r) + BH / 2; el("path", { d: `M${MX + MW},${y1} C${MX + MW + 120},${y1} ${RX - 120},${y2} ${RX},${y2}`, "stroke-width": (0.4 + 3.2 * b / maxCell).toFixed(2), "stroke-opacity": .55 }, wires); }));
+  // file
+  const fBox = el("rect", { x: F.x, y: F.y, width: F.w, height: F.h, rx: 10, class: "box" }, svg);
+  txt(svg, F.x + 12, F.y + 24, "t", "bookOfMormon.txt");
+  const fB = txt(svg, F.x + F.w - 12, F.y + 46, "badge", "");
+  const fTiny = fo(svg, F.x + 10, F.y + 56, F.w - 20, F.h - 66, M.map(m => m.sample).join(" "), "tiny");
+  // mappers & reducers
+  const mBox = [], mB = [], mTiny = [], rBox = [], rB = [], rTop = [], rSub = [];
+  M.forEach((m, i) => {
+    mBox[i] = el("rect", { x: MX, y: yOf(i), width: MW, height: BH, rx: 9, class: "box" }, svg);
+    txt(svg, MX + 12, yOf(i) + 22, "t", "Mapper " + (i + 1)).style.fontSize = "15px";
+    mB[i] = txt(svg, MX + MW - 12, yOf(i) + 22, "badge", "");
+    mTiny[i] = fo(svg, MX + 10, yOf(i) + 30, MW - 20, BH - 36, "", "tiny");
+  });
+  R.forEach((r, i) => {
+    rBox[i] = el("rect", { x: RX, y: yOf(i), width: RW, height: BH, rx: 9, class: "box" }, svg);
+    txt(svg, RX + 12, yOf(i) + 22, "t", "Reducer " + (i + 1)).style.fontSize = "15px";
+    rB[i] = txt(svg, RX + RW - 12, yOf(i) + 22, "badge", "");
+    rSub[i] = txt(svg, RX + 12, yOf(i) + 46, "sub mut", `${r.keys} distinct words`);
+    rTop[i] = txt(svg, RX + 12, yOf(i) + 66, "sub", r.top.map(([w, c]) => `${w} ${c.toLocaleString()}`).join(" · "));
+  });
+  txt(svg, MX + 60, 790 - 4, "s", "hash(word) mod 8 picks the reducer");
+  // output
+  const oBox = el("rect", { x: OUT.x, y: OUT.y, width: OUT.w, height: OUT.h, rx: 10, class: "box" }, svg);
+  txt(svg, OUT.x + 12, OUT.y + 24, "t", "Driver");
+  const oB = txt(svg, OUT.x + OUT.w - 12, OUT.y + 48, "badge", "");
+  const oList = el("g", { style: "opacity:0", class: "sub" }, svg);
+  txt(oList, OUT.x + 12, OUT.y + 72, "sub mut", `${BIG.distinct.toLocaleString()} distinct words`);
+  BIG.top.slice(0, 13).forEach(([w, c], i) => { txt(oList, OUT.x + 12, OUT.y + 96 + i * 20, "sub", w); txt(oList, OUT.x + OUT.w - 12, OUT.y + 96 + i * 20, "sub", c.toLocaleString(), { "text-anchor": "end" }); });
+  // packets
+  const pkt = (label, cls) => { const g = el("g", { class: "pkt mv " + (cls || "") }, svg); el("rect", { x: -40, y: -12, width: 80, height: 24, rx: 12 }, g); const t = el("text", { x: 0, y: 0 }, g); t.textContent = label; return g; };
+  const pSplit = M.map(m => pkt(fmtK(m.bytes)));
+  const pOut = M.map(m => pkt(fmtK(m.map), "orange"));
+  const pIn = R.map(r => pkt(fmtK(r.inp), "orange"));
+  const pRes = R.map(r => pkt(fmtK(r.out), "green"));
+  const fc = [F.x + F.w / 2, F.y + F.h / 2];
+  const steps = [
+    { t: "One big file", d: `The whole Book of Mormon: ${fmtK(BIG.total)}, ${BIG.words.toLocaleString()} words. Real inputs are terabytes, but the moves are exactly the same.` },
+    { t: "Split into 8 chunks", d: `Each mapper gets about ${fmtK(M[0].bytes)}. Follow the floating numbers: that is how much data is moving.` },
+    { t: "Map: every word becomes a pair", d: `Each mapper turns ~33,700 words into ~33,700 <span class="k">(word, 1)</span> pairs. ${fmtK(M[0].bytes)} of text becomes about ${fmtK(M[0].map)} of pairs. Across all 8 machines, ${fmtK(BIG.total)} became ${fmtK(sumMap)}. Map makes the data bigger.` },
+    { t: "Shuffle: every mapper sends to every reducer", d: `<span class="k">hash(word) mod 8</span> picks each word's reducer, so all 8 mappers send pairs to all 8 reducers: 64 transfers, ${fmtK(sumMap)} over the network. The loads are uneven. Reducer ${hot + 1} gets ${fmtK(R[hot].inp)} because it owns <span class="k">the</span> (19,250 times). Reducer 6 owns <span class="k">and</span>. One very common key makes one slow machine: a <b>hot key</b>.` },
+    { t: "Reduce: one count per word", d: `Each reducer adds up about 700 distinct words. ${fmtK(R[hot].inp)} on Reducer ${hot + 1} shrinks to ${fmtK(R[hot].out)}. Every reducer's output is about 7 KB, roughly 1/25 of one mapper's input chunk.` },
+    { t: "Results go back to the driver", d: `The driver gets ${fmtK(BIG.out)}: ${BIG.distinct.toLocaleString()} words and their counts. That is less than a third of <b>one</b> input chunk and 1/26 of the book. The busiest step was the shuffle. Part 3 shows how real systems shrink it.` }];
+  function show(k) {
+    fBox.setAttribute("class", "box" + (k === 0 ? " on" : ""));
+    countTo(fB, k === 0 ? BIG.total : null, fmtK);
+    fTiny.d.style.opacity = k === 0 ? .9 : .12;
+    M.forEach((m, i) => {
+      mBox[i].setAttribute("class", "box" + (k === 1 || k === 2 ? " on" : ""));
+      mTiny[i].d.innerHTML = k >= 2 ? tok(m.sample).map(w => w + " 1").join(" ") : m.sample;
+      mTiny[i].d.style.opacity = k === 1 ? .95 : k === 2 ? .9 : k === 3 ? .25 : k >= 4 ? .08 : 0;
+      countTo(mB[i], k === 1 ? m.bytes : k === 2 || k === 3 ? m.map : null, fmtK);
+      const mid = [MX + 30, yOf(i) + BH / 2];
+      if (k === 0) put(pSplit[i], fc[0], fc[1], 0); else if (k === 1) put(pSplit[i], mid[0] + 40, mid[1] + 18, 1, i * 90); else put(pSplit[i], mid[0] + 40, mid[1] + 18, 0);
+      if (k < 3) put(pOut[i], MX + MW - 50, yOf(i) + BH - 14, k === 2 ? 1 : 0, k === 2 ? 400 + i * 60 : 0);
+      else put(pOut[i], 640, 400, 0);
+    });
+    wires.style.opacity = k === 3 ? 1 : k === 4 ? .2 : 0;
+    R.forEach((r, i) => {
+      rBox[i].setAttribute("class", "box" + ((k === 3 || k === 4) ? (i === hot && k === 3 ? " on" : " on") : ""));
+      rBox[i].style.strokeWidth = k === 3 && i === hot ? 4 : "";
+      countTo(rB[i], k === 3 ? r.inp : k === 4 ? r.out : null, fmtK);
+      rSub[i].style.opacity = k >= 3 && k <= 4 ? 1 : 0;
+      rTop[i].style.opacity = k === 4 ? 1 : 0;
+      if (k < 3) put(pIn[i], 640, 400, 0); else if (k === 3) put(pIn[i], RX + RW - 50, yOf(i) + BH - 14, 1, 500 + i * 60); else put(pIn[i], RX + RW - 50, yOf(i) + BH - 14, 0);
+      if (k < 4) put(pRes[i], RX + RW - 50, yOf(i) + BH - 14, 0); else if (k === 4) put(pRes[i], RX + RW - 50, yOf(i) + BH - 14, 1, 300); else put(pRes[i], OUT.x + OUT.w / 2, OUT.y + 40, 0, i * 70);
+    });
+    oBox.setAttribute("class", "box" + (k === 5 ? " on" : ""));
+    countTo(oB, k === 5 ? BIG.out : null, fmtK);
+    oList.style.opacity = k === 5 ? 1 : 0;
+  }
+  player(2, steps, show);
+
+  // summary chart
+  const maxShuf = Math.max(...R.map(r => r.inp)), combTot = M.reduce((s, m) => s + m.comb, 0), maxComb = Math.max(...R.map(r => r.inpComb));
+  const rows = [
+    ["Input text", "split across 8 mappers", BIG.total, Math.max(...M.map(m => m.bytes))],
+    ["Map output", "(word, 1) pairs", sumMap, Math.max(...M.map(m => m.map))],
+    ["Shuffled", "over the network to reducers", sumMap, maxShuf, combTot, maxComb],
+    ["Reduce output", "the answer", BIG.out, Math.max(...R.map(r => r.out))]];
+  const scale = v => (v / sumMap * 82).toFixed(2) + "%";
+  document.getElementById("sumrows").innerHTML = rows.map(([a, b, tot, one, ct, co]) => `
+    <div class="srow"><div class="lbl">${a}<small>${b}</small></div><div class="sbars">
+      <div class="sbar tot"><b style="width:${scale(tot)}"></b>${fmtK(tot)}</div>
+      <div class="sbar one"><b style="width:${scale(one)}"></b>${fmtK(one)}</div>
+      ${ct ? `<div class="sbar comb"><b style="width:${scale(ct)}"></b>${fmtK(ct)} total with a combiner (busiest reducer ${fmtK(co)})</div>` : ""}
+    </div></div>`).join("");
+})();
+
+/* =================== PART 3 =================== */
+(function () {
+  const svg = document.getElementById("sv3");
+  const defs = el("defs", {}, svg); const mk = el("marker", { id: "ah3", viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" }, defs); el("path", { d: "M0,0 L10,5 L0,10 z", style: "fill:var(--hl)" }, mk);
+  const box = (x, y, w, h, title, sub) => { const r = el("rect", { x, y, width: w, height: h, rx: 10, class: "box" }, svg); const t = txt(svg, x + 12, y + 22, "t", title); t.style.fontSize = "15px"; if (sub) txt(svg, x + 12, y + 40, "s", sub); return r; };
+  const U = box(20, 20, 230, 70, "Your program", "word count · M=3 maps, R=2 reduces");
+  const MS = box(450, 16, 300, 128, "Master", "tracks every task, pings workers");
+  const IN = box(20, 170, 200, 420, "Input files (DFS)", "GFS / HDFS");
+  const W = [["Worker A", 170], ["Worker B", 330], ["Worker C", 490]].map(([n, y]) => ({ r: box(290, y, 300, 140, n), y }));
+  const RD = [["Worker D", 230], ["Worker E", 420]].map(([n, y]) => ({ r: box(700, y, 250, 150, n), y }));
+  const OU = box(990, 170, 190, 420, "Output files (DFS)", "one file per reducer");
+  // master table
+  const mt = fo(svg, 462, 62, 280, 80, "", "fo"); mt.d.style.fontFamily = "var(--f-mono)"; mt.d.style.fontSize = "11.5px"; mt.d.style.lineHeight = "1.3";
+  // splits
+  const splits = [0, 1, 2].map(i => { const y = 220 + i * 120; const g = el("g", {}, svg); el("rect", { x: 34, y, width: 172, height: 92, rx: 7, class: "disk" }, g); txt(g, 46, y + 22, "sub", `split ${i + 1} · 128 MB`); [0, 1, 2].forEach(j => { el("circle", { cx: 54 + j * 26, cy: y + 52, r: 9, style: "fill:var(--p1-bg);stroke:var(--p1);stroke-width:1.4" }, g); }); txt(g, 46, y + 80, "sub mut", "stored on 3 machines"); return g; });
+  // worker internals
+  const wInner = W.map((w, i) => {
+    const g = el("g", {}, svg);
+    const task = txt(g, 395, w.y + 22, "sub", ""); task.style.fontWeight = 700;
+    const mem = el("rect", { x: 302, y: w.y + 34, width: 128, height: 52, rx: 6, class: "disk" }, g);
+    const memT = txt(g, 310, w.y + 54, "sub", "memory buffer"); const memS = txt(g, 310, w.y + 72, "sub mut", "");
+    const dk = el("rect", { x: 442, y: w.y + 34, width: 138, height: 96, rx: 6, class: "disk" }, g);
+    txt(g, 450, w.y + 52, "sub mut", "local disk");
+    const f1 = el("g", { class: "mv" }, g); el("rect", { x: 450, y: w.y + 62, width: 58, height: 26, rx: 4, class: "file1" }, f1); const f1t = txt(f1, 479, w.y + 75, "ftxt a", "for R1");
+    const f2 = el("g", { class: "mv" }, g); el("rect", { x: 514, y: w.y + 62, width: 58, height: 26, rx: 4, class: "file2" }, f2); txt(f2, 543, w.y + 75, "ftxt b", "for R2");
+    const sz = txt(g, 450, w.y + 112, "sub mut", "");
+    const x = el("g", { class: "x", style: "opacity:0" }, g); el("path", { d: `M300,${w.y + 10} L580,${w.y + 130} M580,${w.y + 10} L300,${w.y + 130}`, class: "x" }, x);
+    return { task, memS, f1, f2, sz, x, mem };
+  });
+  const rInner = RD.map((r, i) => {
+    const g = el("g", {}, svg);
+    const task = txt(g, 790, r.y + 22, "sub", `reduce ${i + 1}`); task.style.fontWeight = 700;
+    const l1 = txt(g, 712, r.y + 52, "sub", "1 fetch its partition from each map");
+    const l2 = txt(g, 712, r.y + 74, "sub", "2 merge-sort by key");
+    const l3 = txt(g, 712, r.y + 96, "sub", "3 reduce(key, [values])");
+    const l4 = txt(g, 712, r.y + 118, "sub", `4 write part-0000${i}`);
+    return { ls: [l1, l2, l3, l4] };
+  });
+  const outs = [0, 1].map(i => { const y = 240 + i * 170; const g = el("g", { class: "mv" }, svg); el("rect", { x: 1004, y, width: 162, height: 70, rx: 7, class: i ? "file2" : "file1" }, g); txt(g, 1085, y + 24, "ftxt " + (i ? "b" : "a"), `part-0000${i}`); txt(g, 1085, y + 48, "sub mut", "3 replicas", { "text-anchor": "middle" }); return g; });
+  // arrows
+  const ar = (d, w) => el("path", { d, class: "wire", "stroke-width": w || 2, "marker-end": "url(#ah3)", style: "opacity:0" }, svg);
+  const aSubmit = ar("M250,55 L448,70");
+  const aAssign = W.map(w => ar(`M560,146 L${520},${w.y - 2}`));
+  aAssign[0].setAttribute("d", "M520,146 L470,168"); aAssign[1].setAttribute("d", "M600,146 C640,200 620,300 592,330"); aAssign[2].setAttribute("d", "M680,146 C720,260 680,440 592,490");
+  const aRead = [0, 1, 2].map(i => ar(`M206,${266 + i * 120} L288,${W[i].y + 60}`, 3));
+  const aRerun = ar("M592,400 C640,420 640,480 592,520", 3);
+  const aAssignR = RD.map((r, i) => ar(`M750,${100 + i * 20} C800,140 830,${r.y - 40} 830,${r.y - 2}`));
+  const aFetch = []; W.forEach((w, i) => RD.forEach((r, j) => aFetch.push(ar(`M${j ? 572 : 508},${w.y + 75} C650,${w.y + 75} 650,${r.y + 75} 698,${r.y + 75}`, 1.8))));
+  const aWrite = RD.map((r, i) => ar(`M950,${r.y + 75} L1002,${275 + i * 170}`, 3));
+  const aDone = ar("M450,110 C350,140 250,120 200,92");
+  const allA = [aSubmit, ...aAssign, ...aRead, aRerun, ...aAssignR, ...aFetch, ...aWrite, aDone];
+  const comb = BIG.mappers[0];
+  const steps = [
+    { t: "Input lives in a distributed file system", d: `The input is split into big blocks (128 MB in HDFS, 64 MB in Google's GFS). Each block is stored on 3 different machines, so losing a disk loses nothing.` },
+    { t: "Submit the job: one master, many workers", d: `Your program starts one <b>master</b> and many <b>workers</b>. The master keeps a table with every task: M map tasks (one per split) and R reduce tasks. Each task is idle, in progress or done.` },
+    { t: "Assign map tasks, and move the code to the data", d: `The master gives each idle worker a map task, preferring a worker that already has a copy of that split on its own disk. Sending a small program to the data is cheaper than sending 128 MB to the program.` },
+    { t: "Map: read the split, run map(), buffer the pairs", d: `Each worker reads its split and calls your <span class="k">map()</span> once per record. The pairs pile up in a memory buffer.` },
+    { t: "Partition, sort, combine, write to local disk", d: `When the buffer fills, the worker splits it into R partitions with <span class="k">hash(key) mod R</span>, sorts each one by key and runs the <b>combiner</b> (a local reduce). Then it writes the partitions to its <b>own disk</b>, not the DFS, and tells the master where they are. In our 8-machine run the combiner shrinks each mapper's output from ${fmtK(comb.map)} to ${fmtK(comb.comb)}, and the whole shuffle from 1.93 MB to 168 KB.` },
+    { t: "A worker dies, and the master re-runs its task", d: `Worker B stops answering the master's pings. The master marks map 2 as idle again and gives it to Worker C, <b>even though map 2 had finished</b>, because its output was on B's local disk. This is the restorer from today's first topic. Who watches the master? In the original paper, nobody: if the master dies, the job fails and you run it again.` },
+    { t: "Shuffle: reducers fetch their partition from every map worker", d: `Each reducer pulls its own partition (the blue or the orange file) from every map worker's disk over the network: M × R fetches. A reducer can't start reducing until <b>every</b> map task is done, because any mapper might have one more <span class="k">small 1</span>.` },
+    { t: "Merge-sort, then reduce each key", d: `Each reducer merge-sorts the files it fetched, so all values for a key arrive together, then calls your <span class="k">reduce(key, values)</span> once per key. Near the end, the master starts backup copies of slow tasks (<b>stragglers</b>) and keeps whichever copy finishes first.` },
+    { t: "Write the output and finish", d: `Each reducer writes one output file to the DFS, stored on 3 machines like the input. The master tells your program the job is done. The answer is R files (here <span class="k">part-00000</span> and <span class="k">part-00001</span>), often the input for the next MapReduce job.` }];
+  const st = (m2, rest) => `map 1 · split 1 · ${rest[0]}<br>map 2 · split 2 · ${m2}<br>map 3 · split 3 · ${rest[1]}<br>reduce 1 · ${rest[2]}<br>reduce 2 · ${rest[3]}`;
+  function show(k) {
+    allA.forEach(a => a.style.opacity = 0);
+    [U, MS, IN, OU].forEach(b => b.setAttribute("class", "box"));
+    W.forEach(w => w.r.setAttribute("class", "box")); RD.forEach(r => r.r.setAttribute("class", "box"));
+    const on = b => b.setAttribute("class", "box on");
+    if (k === 0) on(IN); if (k === 1) { on(U); on(MS); aSubmit.style.opacity = 1; }
+    if (k === 2) { on(MS); aAssign.forEach(a => a.style.opacity = 1); aRead.forEach(a => a.style.opacity = .35); }
+    if (k === 3) { W.forEach(w => on(w.r)); aRead.forEach(a => a.style.opacity = 1); }
+    if (k === 4) W.forEach(w => on(w.r));
+    if (k === 5) { on(MS); W[1].r.setAttribute("class", "box dead"); on(W[2].r); aRerun.style.opacity = 1; }
+    if (k >= 5) W[1].r.setAttribute("class", "box dead");
+    if (k === 6) { RD.forEach(r => on(r.r)); aFetch.forEach((a, i) => a.style.opacity = Math.floor(i / 2) === 1 ? 0 : 1); aAssignR.forEach(a => a.style.opacity = .5); }
+    if (k === 7) RD.forEach(r => on(r.r));
+    if (k === 8) { on(OU); on(U); aWrite.forEach(a => a.style.opacity = 1); aDone.style.opacity = 1; }
+    const state = ["–", "–", "–", "–"];
+    let m2 = "–";
+    if (k >= 2) { state[0] = "A · running"; m2 = "B · running"; state[1] = "C · running"; }
+    if (k >= 4) { state[0] = "A · done"; m2 = "B · done"; state[1] = "C · done"; }
+    if (k >= 5) m2 = '<span class="cb">B dead</span> → C · running';
+    if (k >= 6) { m2 = "C · done (rerun)"; state[2] = "D · running"; state[3] = "E · running"; }
+    if (k >= 8) { state[2] = "D · done"; state[3] = "E · done"; }
+    mt.d.innerHTML = k >= 1 ? st(m2, state) : '<span style="color:var(--muted)">no job yet</span>';
+    wInner.forEach((w, i) => {
+      w.task.textContent = k < 2 ? "idle" : i === 2 && k >= 5 ? "map 3, then map 2" : "map " + (i + 1);
+      w.task.setAttribute("x", 395);
+      w.memS.textContent = k === 3 ? "(word, 1) pairs…" : k >= 4 && !(i === 1 && k >= 5) ? "flushed" : "";
+      const showFiles = k >= 4 && !(i === 1 && k >= 5);
+      w.f1.style.opacity = showFiles ? 1 : 0; w.f2.style.opacity = showFiles ? 1 : 0;
+      w.sz.textContent = k === 4 ? "sorted · combined" : "";
+      w.x.style.opacity = i === 1 && k >= 5 ? 1 : 0;
+    });
+    rInner.forEach(r => r.ls.forEach((l, j) => { l.style.opacity = k < 6 ? .25 : (k === 6 && j === 0) || (k === 7 && (j === 1 || j === 2)) || (k === 8 && j === 3) ? 1 : .45; l.style.fontWeight = ((k === 6 && j === 0) || (k === 7 && (j === 1 || j === 2)) || (k === 8 && j === 3)) ? 700 : 400; }));
+    outs.forEach(o => o.style.opacity = k >= 8 ? 1 : 0);
+  }
+  player(3, steps, show);
+})();
+</script>
+
+</body>
+</html>

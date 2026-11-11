@@ -1,6 +1,8 @@
 # Big Data & MapReduce — Why It Matters
 
 > **Read time:** ~10 minutes. This page gives you the "why" and "how" of distributed data processing before you dive into SparkSQL.
+>
+> **Animated version:** [MapReduce, Step by Step](https://byu-cs-452.github.io/byu-cs-452-class-content/sparksql/media/mapreduce.html)
 
 ---
 
